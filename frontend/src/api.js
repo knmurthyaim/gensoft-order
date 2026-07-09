@@ -1,7 +1,20 @@
 import axios from "axios";
 
+function getApiBase() {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  const { hostname, protocol } = window.location;
+  // Render static site gensoft-order-1 → API service gensoft-order
+  if (hostname.endsWith(".onrender.com") && hostname.includes("-1.")) {
+    const apiHost = hostname.replace("-1.", ".");
+    return `${protocol}//${apiHost}/api`;
+  }
+  return "/api";
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  baseURL: getApiBase(),
   headers: { "Content-Type": "application/json" },
 });
 
