@@ -1,0 +1,38 @@
+{
+  "replace_all": false,
+  "bills": [
+    {
+      "party_id": "R001",
+      "party_name": "Sri Dattha Central Pharmacy",
+      "invoice_no": "INV-24001",
+      "invoice_date": "2026-05-25",
+      "amount": 25000,
+      "paid": 8000,
+      "balance": 17000,
+      "age": 45,
+      "discount": 0
+    },
+    {
+      "party_id": "R001",
+      "party_name": "Sri Dattha Central Pharmacy",
+      "invoice_no": "INV-24015",
+      "invoice_date": "2026-06-27",
+      "amount": 8500,
+      "paid": 1500,
+      "balance": 6850,
+      "age": 12,
+      "discount": 150
+    },
+    {
+      "party_id": "R002",
+      "party_name": "Vasavi Medical Stores",
+      "invoice_no": "INV-24022",
+      "invoice_date": "2026-06-09",
+      "amount": 12000,
+      "paid": 7500,
+      "balance": 4500,
+      "age": 30,
+      "discount": 0
+    }
+  ]
+}

@@ -1,0 +1,299 @@
+import { useEffect, useState } from "react";
+import Modal from "../components/Modal.jsx";
+import { batches, products as prodApi } from "../api";
+import { fmtDate, inr } from "../format";
+
+const empty = {
+  product_id: "",
+  batch_no: "",
+  expiry_date: "",
+  available_qty: 0,
+  scheme: "",
+  mrp: 0,
+  ptr_rate: 0,
+  pts_rate: 0,
+  show_to_customer: true,
+};
+
+export default function Stock() {
+  const [rows, setRows] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(empty);
+  const [error, setError] = useState("");
+
+  const load = () =>
+    batches.list().then(setRows).catch(() => setError("Failed to load stock."));
+
+  useEffect(() => {
+    load();
+    prodApi.list().then(setProducts).catch(() => {});
+  }, []);
+
+  const pMap = Object.fromEntries(products.map((p) => [p.id, p]));
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm(empty);
+    setError("");
+    setShowModal(true);
+  };
+
+  const openEdit = (b) => {
+    setEditing(b);
+    setForm({ ...b, expiry_date: b.expiry_date || "" });
+    setError("");
+    setShowModal(true);
+  };
+
+  const onProductChange = (id) => {
+    const p = pMap[id];
+    setForm((f) => ({
+      ...f,
+      product_id: id,
+      mrp: p ? p.mrp : f.mrp,
+      ptr_rate: p ? p.ptr_rate : f.ptr_rate,
+      pts_rate: p ? p.pts_rate : f.pts_rate,
+    }));
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        product_id: parseInt(form.product_id, 10),
+        batch_no: form.batch_no,
+        expiry_date: form.expiry_date || null,
+        available_qty: parseInt(form.available_qty, 10) || 0,
+        scheme: form.scheme,
+        mrp: parseFloat(form.mrp) || 0,
+        ptr_rate: parseFloat(form.ptr_rate) || 0,
+        pts_rate: parseFloat(form.pts_rate) || 0,
+        show_to_customer: !!form.show_to_customer,
+      };
+      if (editing) {
+        const { product_id, ...upd } = payload;
+        await batches.update(editing.id, upd);
+      } else {
+        await batches.create(payload);
+      }
+      setShowModal(false);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Save failed.");
+    }
+  };
+
+  const remove = async (b) => {
+    if (!confirm("Delete this batch?")) return;
+    await batches.remove(b.id);
+    load();
+  };
+
+  const toggleVisible = async (b) => {
+    await batches.update(b.id, { show_to_customer: !b.show_to_customer });
+    load();
+  };
+
+  const nearExpiry = (d) => {
+    if (!d) return false;
+    return (new Date(d) - new Date()) / 86400000 <= 90;
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Stock / Batches</h1>
+          <p className="page-sub">
+            Batch-wise inventory. Toggle "Show" to share a batch with connected
+            customers.
+          </p>
+        </div>
+        <button className="btn" onClick={openCreate}>
+          + Add Batch
+        </button>
+      </div>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      <div className="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Batch</th>
+              <th>Expiry</th>
+              <th>Qty</th>
+              <th>Scheme</th>
+              <th>PTR</th>
+              <th>PTS</th>
+              <th>Show</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => (
+              <tr key={b.id}>
+                <td>
+                  <strong>{b.product?.name || pMap[b.product_id]?.name}</strong>
+                </td>
+                <td>{b.batch_no || "—"}</td>
+                <td className={nearExpiry(b.expiry_date) ? "low-stock" : ""}>
+                  {fmtDate(b.expiry_date)}
+                </td>
+                <td className={b.available_qty < 10 ? "low-stock" : ""}>
+                  {b.available_qty}
+                </td>
+                <td>{b.scheme || "—"}</td>
+                <td>{inr(b.ptr_rate)}</td>
+                <td>{inr(b.pts_rate)}</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={!!b.show_to_customer}
+                    onChange={() => toggleVisible(b)}
+                  />
+                </td>
+                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                  <button className="btn secondary sm" onClick={() => openEdit(b)}>
+                    Edit
+                  </button>{" "}
+                  <button className="btn danger sm" onClick={() => remove(b)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={9} className="empty">
+                  No stock batches yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showModal && (
+        <Modal
+          title={editing ? "Edit Batch" : "Add Batch"}
+          onClose={() => setShowModal(false)}
+        >
+          {error && <div className="error-banner">{error}</div>}
+          <form onSubmit={save}>
+            <div className="form-grid">
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <label>Product</label>
+                <select
+                  required
+                  disabled={!!editing}
+                  value={form.product_id}
+                  onChange={(e) => onProductChange(e.target.value)}
+                >
+                  <option value="">Select product...</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.pack_size})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Batch No.</label>
+                <input
+                  value={form.batch_no}
+                  onChange={(e) => setForm({ ...form, batch_no: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>Expiry Date</label>
+                <input
+                  type="date"
+                  value={form.expiry_date}
+                  onChange={(e) =>
+                    setForm({ ...form, expiry_date: e.target.value })
+                  }
+                />
+              </div>
+              <div className="field">
+                <label>Available Qty</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.available_qty}
+                  onChange={(e) =>
+                    setForm({ ...form, available_qty: e.target.value })
+                  }
+                />
+              </div>
+              <div className="field">
+                <label>Scheme (e.g. 10+1)</label>
+                <input
+                  value={form.scheme}
+                  onChange={(e) => setForm({ ...form, scheme: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>MRP</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.mrp}
+                  onChange={(e) => setForm({ ...form, mrp: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>PTR Rate</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.ptr_rate}
+                  onChange={(e) => setForm({ ...form, ptr_rate: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>PTS Rate</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.pts_rate}
+                  onChange={(e) => setForm({ ...form, pts_rate: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>Show to connected customers</label>
+                <select
+                  value={form.show_to_customer ? "yes" : "no"}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      show_to_customer: e.target.value === "yes",
+                    })
+                  }
+                >
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setShowModal(false)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn">
+                Save
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}

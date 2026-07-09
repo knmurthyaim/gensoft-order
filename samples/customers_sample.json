@@ -1,0 +1,31 @@
+{
+  "replace_all": false,
+  "customers": [
+    {
+      "code": "R003",
+      "name": "Apollo Pharmacy",
+      "party_type": "customer",
+      "address": "Main Road, Ameerpet",
+      "area": "Ameerpet",
+      "city": "Hyderabad",
+      "mobile": "9876543210",
+      "dl_no": "TS/HYD/20R-2003",
+      "gst_no": "36APOLLO003Z1Z1",
+      "sales_rep_name": "M Naresh",
+      "pricing_model": "PTR"
+    },
+    {
+      "code": "R004",
+      "name": "MedPlus Kukatpally",
+      "party_type": "customer",
+      "address": "KPHB Road",
+      "area": "Kukatpally",
+      "city": "Hyderabad",
+      "mobile": "9123456789",
+      "dl_no": "TS/HYD/20R-2004",
+      "gst_no": "36MEDPL004Z1Z2",
+      "sales_rep_name": "Suresh Kumar",
+      "pricing_model": "PTR"
+    }
+  ]
+}
