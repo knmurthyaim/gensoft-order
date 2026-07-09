@@ -57,7 +57,9 @@ On first deploy, tables are created automatically. Super admin: `superadmin` / `
 
 | Key | Value |
 |-----|--------|
-| `VITE_API_URL` | `https://YOUR-API.onrender.com/api` |
+| `VITE_API_URL` | `https://gensoft-order.onrender.com/api` |
+
+**Important:** `VITE_API_URL` is baked in at **build time**. After adding/changing it, trigger a **new deploy** of the static site.
 
 Or use Render **rewrite** rules so `/api` proxies to the backend (see `render.yaml`).
 

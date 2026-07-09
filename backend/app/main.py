@@ -49,6 +49,23 @@ def _ensure_super_admin():
 
 _ensure_super_admin()
 
+
+def _seed_demo_if_empty():
+    """Load demo accounts on first deploy (empty Postgres)."""
+    from app import models
+
+    db = SessionLocal()
+    try:
+        if db.query(models.Account).count() == 0:
+            import seed
+
+            seed.run()
+    finally:
+        db.close()
+
+
+_seed_demo_if_empty()
+
 app = FastAPI(
     title="GenSoft Ordering Platform API",
     description="Multi-tenant ordering platform connecting distributors, "
