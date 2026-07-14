@@ -61,6 +61,22 @@ On first deploy, tables are created automatically. Super admin: `superadmin` / `
 
 **Important:** `VITE_API_URL` is baked in at **build time**. After adding/changing it, trigger a **new deploy** of the static site.
 
+### Fix “Not Found” on refresh (`/settings`, `/marketplace`, etc.)
+
+React uses client-side routes. Render must rewrite unknown paths to `index.html`.
+
+In Render → **gensoft-order-1** (Static Site) → **Redirects/Rewrites** → **Add Rule**:
+
+| Field | Value |
+|-------|--------|
+| Source | `/*` |
+| Destination | `/index.html` |
+| Action | **Rewrite** |
+
+Save, then redeploy (or wait for auto-deploy). After that, refreshing `/settings` works.
+
+Or use Blueprint `render.yaml` (already includes this rewrite for `gensoft-web`).
+
 Or use Render **rewrite** rules so `/api` proxies to the backend (see `render.yaml`).
 
 ---
