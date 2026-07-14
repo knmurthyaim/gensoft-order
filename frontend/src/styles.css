@@ -1473,9 +1473,254 @@ textarea {
   background: #fff8f0;
 }
 
+/* Place Order — search & add */
+.order-step-fields {
+  margin-bottom: 12px;
+}
+
+.order-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.order-field select {
+  max-width: 420px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.order-field .req {
+  color: #d93025;
+  font-style: normal;
+}
+
+.order-hint {
+  margin: 0 0 12px;
+}
+
+.product-field {
+  margin-bottom: 6px;
+  max-width: none;
+}
+
+.order-search-input.selected {
+  border-color: #1a73e8;
+  background: #f8fbff;
+}
+
+.selected-product-chip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #155724;
+  background: #e8f5e9;
+  border: 1px solid #c8e6c9;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.order-search-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  margin-top: 8px;
+}
+
+.stock-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted, #666);
+  margin-bottom: 10px;
+}
+
+.stock-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #9aa0a6;
+  flex-shrink: 0;
+}
+
+.dot.ok {
+  background: #1a73e8;
+}
+
+.dot.low {
+  background: #202124;
+}
+
+.dot.none {
+  background: #d93025;
+}
+
+.dot.unknown {
+  background: #bdc1c6;
+}
+
+.order-search-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.order-search-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.order-search-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.order-search-input:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+}
+
+.order-qty-input {
+  width: 72px;
+  padding: 12px 8px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.order-add-btn {
+  min-width: 48px;
+  height: 46px;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 14px;
+}
+
+.search-hint {
+  position: absolute;
+  right: 12px;
+  top: 14px;
+  font-size: 12px;
+  color: var(--muted, #888);
+}
+
+.order-suggest {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.order-suggest li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.order-suggest li:last-child {
+  border-bottom: none;
+}
+
+.order-suggest li.active,
+.order-suggest li:hover {
+  background: #f0f6ff;
+}
+
+.suggest-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.suggest-body strong {
+  font-size: 14px;
+}
+
+.suggest-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 12px;
+  color: #444;
+  white-space: nowrap;
+}
+
+.empty-suggest {
+  padding: 12px;
+  color: var(--muted, #888);
+  font-size: 13px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.order-search-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #444;
+}
+
+.order-search-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
 @media (max-width: 800px) {
   .settings-row {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+
+  .order-search-row {
+    flex-wrap: wrap;
+  }
+
+  .order-qty-input,
+  .order-add-btn {
+    flex: 0 0 auto;
   }
 }

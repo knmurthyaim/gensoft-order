@@ -493,9 +493,9 @@ def respond_connection(db: Session, account: models.Account, conn_id: int, statu
 
 
 # ---------- Marketplace (connected suppliers' visible stock) ----------
-def get_supplier_catalog(
+def get_supplier_for_catalog(
     db: Session, account: models.Account, supplier_account_id: int
-):
+) -> models.Account:
     if supplier_account_id not in _accepted_supplier_ids(db, account):
         raise AppError("Not connected to this supplier")
     supplier = (
@@ -505,28 +505,86 @@ def get_supplier_catalog(
     )
     if not supplier:
         raise AppError("Supplier not found")
+    return supplier
+
+
+def get_supplier_catalog(
+    db: Session,
+    account: models.Account,
+    supplier_account_id: int,
+    search: Optional[str] = None,
+    limit: int = 40,
+    in_stock_only: bool = False,
+    first_word_exact: bool = False,
+    scheme_only: bool = False,
+):
+    """Search supplier catalog. Empty search returns []. Never loads full catalog."""
+    supplier = get_supplier_for_catalog(db, account, supplier_account_id)
+
+    term = (search or "").strip()
+    if not term:
+        return []
 
     allow_no_stock = bool(supplier.allow_order_no_stock)
-    products = (
-        db.query(models.Product)
-        .filter(models.Product.owner_account_id == supplier_account_id)
-        .order_by(models.Product.name)
-        .all()
+    # Browse "nil stock" when not filtering to in-stock only (ordering still
+    # respects supplier allow_order_no_stock / over-stock rules on submit).
+    include_nil = not in_stock_only
+    limit = max(1, min(int(limit or 40), 100))
+
+    q = db.query(models.Product).filter(
+        models.Product.owner_account_id == supplier_account_id,
+        models.Product.is_on_hold.isnot(True),
     )
+    if first_word_exact:
+        # Match first word of name (word boundary) or exact product code
+        first = term.split()[0]
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(f"{first} %"),
+                models.Product.name.ilike(first),
+                models.Product.product_code.ilike(first),
+            )
+        )
+    else:
+        like = f"%{term}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(like),
+                models.Product.product_code.ilike(like),
+                models.Product.manufacturer.ilike(like),
+            )
+        )
+
+    products = q.order_by(models.Product.name).limit(limit * 3).all()
+    settings = get_distributor_settings(supplier)
     result = []
     for p in products:
         visible = [
             b
             for b in p.stock_batches
-            if b.show_to_customer and (b.available_qty > 0 or allow_no_stock)
+            if b.show_to_customer
+            and (b.available_qty > 0 or include_nil or allow_no_stock)
+            and (not scheme_only or (b.scheme or "").strip())
         ]
+        if in_stock_only:
+            visible = [b for b in visible if b.available_qty > 0]
         _attach_stock(p)
-        if visible or allow_no_stock:
+        if visible:
             result.append({
                 "product": p,
                 "batches": visible,
-                "settings": get_distributor_settings(supplier),
+                "settings": settings,
             })
+        elif include_nil or allow_no_stock:
+            # Product exists but no batch rows — still offer for selection
+            if not scheme_only:
+                result.append({
+                    "product": p,
+                    "batches": [],
+                    "settings": settings,
+                })
+        if len(result) >= limit:
+            break
     return result
 
 

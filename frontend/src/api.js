@@ -152,9 +152,10 @@ export const connections = {
 };
 
 export const marketplace = {
-  catalog: (supplierAccountId) =>
+  /** Search supplier catalog — does not load full product list. */
+  catalog: (supplierAccountId, params = {}) =>
     api
-      .get(`/marketplace/suppliers/${supplierAccountId}/catalog`)
+      .get(`/marketplace/suppliers/${supplierAccountId}/catalog`, { params })
       .then((r) => r.data),
 };
 

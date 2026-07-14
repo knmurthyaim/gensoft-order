@@ -2,6 +2,10 @@
 backend/.env
 backend/order_system.db
 backend/venv/
+tools/uploader/venv/
+tools/uploader/build/
+tools/uploader/dist/
+tools/uploader/*.spec
 __pycache__/
 *.pyc
 .Python

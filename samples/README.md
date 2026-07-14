@@ -1,7 +1,13 @@
 # GenSoft API Upload Samples
 
-Sample JSON and Excel files for bulk upload via API.  
-Login as a **distributor** (e.g. `vajra` / `demo1234`) and use the Bearer token from `POST /api/auth/login`.
+Sample JSON and Excel files for bulk upload from your billing software to the GenSoft cloud.
+
+**Cloud server:** `https://gensoft-order.onrender.com`  
+**Login:** distributor account (e.g. `vajra` / `demo1234`) → get token from `POST /api/auth/login`
+
+**Windows uploader EXE:** see `tools/uploader/` — build with `build_exe.bat`
+
+---
 
 ## 1. Products with stock
 
@@ -18,14 +24,14 @@ Login as a **distributor** (e.g. `vajra` / `demo1234`) and use the Bearer token 
 One row per product **batch**. Repeat product_code/name for multiple batches of the same product.
 
 ```bash
-curl -X POST http://localhost:8000/api/products/upload \
+curl -X POST https://gensoft-order.onrender.com/api/products/upload \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d @products_stock_sample.json
 ```
 
 ```bash
-curl -X POST http://localhost:8000/api/products/upload/excel \
+curl -X POST https://gensoft-order.onrender.com/api/products/upload/excel \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -F "file=@products_stock_sample.xlsx"
 ```
@@ -45,7 +51,7 @@ curl -X POST http://localhost:8000/api/products/upload/excel \
 **Excel columns:** code, name, party_type, address, area, city, mobile, dl_no, gst_no, sales_rep_name, pricing_model
 
 ```bash
-curl -X POST http://localhost:8000/api/parties/upload \
+curl -X POST https://gensoft-order.onrender.com/api/parties/upload \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d @customers_sample.json
@@ -69,13 +75,19 @@ curl -X POST http://localhost:8000/api/parties/upload \
 - `replace_all: true` replaces all existing bills for your account.
 
 ```bash
-curl -X POST http://localhost:8000/api/outstanding/upload \
+curl -X POST https://gensoft-order.onrender.com/api/outstanding/upload \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d @outstanding_sample.json
 ```
 
 ---
+
+## Workflow from your software
+
+1. Export customers, products, and outstanding from your billing/ERP in Excel (match column names above).
+2. Use **GenSoft Uploader** (`tools/uploader/dist/GenSoftUploader.exe`) or the web **Import** page.
+3. Data is stored in your distributor account on the cloud — retailers see it after connection.
 
 ## Notes
 

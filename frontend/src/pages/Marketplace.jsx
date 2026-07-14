@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getDirectory, marketplace, orders as ordersApi } from "../api";
 import { fmtDate, inr } from "../format";
@@ -10,17 +10,41 @@ const defaultSettings = {
   hide_scheme_from_parties: true,
 };
 
+const LOW_STOCK_QTY = 10;
+
+function stockTone(avail, hidden) {
+  if (hidden || avail === null || avail === undefined) return "unknown";
+  if (avail <= 0) return "none";
+  if (avail <= LOW_STOCK_QTY) return "low";
+  return "ok";
+}
+
 export default function Marketplace() {
   const navigate = useNavigate();
   const [suppliers, setSuppliers] = useState([]);
   const [supplierId, setSupplierId] = useState("");
-  const [catalog, setCatalog] = useState([]);
   const [supplierSettings, setSupplierSettings] = useState(defaultSettings);
   const [catalogNotice, setCatalogNotice] = useState("");
+
+  const [query, setQuery] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [addQty, setAddQty] = useState("1");
+
+  const [firstWordExact, setFirstWordExact] = useState(false);
+  const [schemeOnly, setSchemeOnly] = useState(false);
+  const [stockMode, setStockMode] = useState("all"); // all | in_stock
+
   const [cart, setCart] = useState({});
   const [error, setError] = useState("");
   const [placing, setPlacing] = useState(false);
   const [notice, setNotice] = useState("");
+
+  const searchRef = useRef(null);
+  const qtyRef = useRef(null);
 
   useEffect(() => {
     getDirectory()
@@ -30,48 +54,156 @@ export default function Marketplace() {
       .catch(() => setError("Failed to load suppliers."));
   }, []);
 
-  const loadCatalog = (id) => {
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const selectSupplier = (id) => {
     setSupplierId(id);
     setCart({});
     setNotice("");
+    setQuery("");
+    setDebouncedQ("");
+    setResults([]);
+    setSelected(null);
+    setError("");
     if (!id) {
-      setCatalog([]);
       setSupplierSettings(defaultSettings);
+      setCatalogNotice("");
       return;
     }
     marketplace
-      .catalog(id)
+      .catalog(id, { q: "", limit: 1 })
       .then((data) => {
-        setCatalog(data.items || []);
         setSupplierSettings(data.settings || defaultSettings);
         setCatalogNotice(data.notice || "");
+        setTimeout(() => searchRef.current?.focus(), 50);
       })
       .catch((err) =>
-        setError(err.response?.data?.detail || "Failed to load catalog.")
+        setError(err.response?.data?.detail || "Failed to open supplier.")
       );
   };
+
+  useEffect(() => {
+    if (!supplierId || debouncedQ.length < 1) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    marketplace
+      .catalog(supplierId, {
+        q: debouncedQ,
+        limit: 40,
+        in_stock_only: stockMode === "in_stock",
+        first_word_exact: firstWordExact,
+        scheme_only: schemeOnly,
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setSupplierSettings(data.settings || defaultSettings);
+        const flat = [];
+        for (const entry of data.items || []) {
+          if (entry.batches?.length) {
+            for (const batch of entry.batches) {
+              flat.push({ entry, batch });
+            }
+          } else {
+            // Product with no batch — still selectable
+            flat.push({ entry, batch: null });
+          }
+        }
+        setResults(flat);
+        setHighlight(0);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(err.response?.data?.detail || "Search failed.");
+      })
+      .finally(() => {
+        if (!cancelled) setSearching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supplierId, debouncedQ, stockMode, firstWordExact, schemeOnly]);
 
   const cartKey = (entry, batch) =>
     batch ? `b-${batch.id}` : `p-${entry.product.id}`;
 
-  const setQty = (entry, batch, qty) => {
-    const n = parseInt(qty, 10) || 0;
+  const addToCart = (row, qtyRaw) => {
+    if (!row) {
+      setError("Product selection is required. Search and choose a product first.");
+      searchRef.current?.focus();
+      return;
+    }
+    const n = parseInt(qtyRaw, 10) || 0;
+    if (n <= 0) {
+      setError("Enter a quantity of at least 1.");
+      qtyRef.current?.focus();
+      return;
+    }
+    const { entry, batch } = row;
+    const avail = batch
+      ? batch.stock_hidden
+        ? null
+        : batch.available_qty
+      : entry.product.total_stock;
+    if (
+      avail !== null &&
+      avail !== undefined &&
+      !supplierSettings.allow_order_over_stock &&
+      n > avail &&
+      avail > 0
+    ) {
+      setError(`Only ${avail} available for ${entry.product.name}.`);
+      return;
+    }
+    if (avail === 0 && !supplierSettings.allow_order_no_stock) {
+      setError("This product has no stock.");
+      return;
+    }
     const key = cartKey(entry, batch);
+    setCart((c) => {
+      const prev = c[key]?.qty || 0;
+      return { ...c, [key]: { qty: prev + n, entry, batch } };
+    });
+    setError("");
+    setSelected(null);
+    setQuery("");
+    setDebouncedQ("");
+    setResults([]);
+    setAddQty("1");
+    searchRef.current?.focus();
+  };
+
+  const setLineQty = (key, qty) => {
+    const n = parseInt(qty, 10) || 0;
     setCart((c) => {
       const next = { ...c };
       if (n <= 0) delete next[key];
-      else next[key] = { qty: n, entry, batch };
+      else if (next[key]) next[key] = { ...next[key], qty: n };
+      return next;
+    });
+  };
+
+  const removeLine = (key) => {
+    setCart((c) => {
+      const next = { ...c };
+      delete next[key];
       return next;
     });
   };
 
   const cartLines = Object.values(cart);
+  const cartKeys = Object.keys(cart);
 
   const total = useMemo(
     () =>
       cartLines.reduce((sum, l) => {
-        const rate =
-          l.batch?.ptr_rate || l.entry.product.ptr_rate;
+        const rate = l.batch?.ptr_rate || l.entry.product.ptr_rate;
         const taxable = rate * l.qty;
         return sum + taxable + (taxable * l.entry.product.gst_pct) / 100;
       }, 0),
@@ -94,7 +226,6 @@ export default function Marketplace() {
       });
       setNotice("Order placed successfully.");
       setCart({});
-      loadCatalog(supplierId);
       setTimeout(() => navigate("/my-orders"), 800);
     } catch (err) {
       setError(err.response?.data?.detail || "Could not place order.");
@@ -103,15 +234,27 @@ export default function Marketplace() {
     }
   };
 
-  const rows = catalog.flatMap((entry) => {
-    if (entry.batches.length > 0) {
-      return entry.batches.map((b) => ({ entry, batch: b }));
+  const onSearchKeyDown = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, Math.max(results.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (results[highlight]) {
+        setSelected(results[highlight]);
+        setQuery(results[highlight].entry.product.name);
+        setResults([]);
+        setTimeout(() => qtyRef.current?.focus(), 0);
+      } else if (selected) {
+        addToCart(selected, addQty);
+      }
+    } else if (e.key === "Escape") {
+      setResults([]);
     }
-    if (supplierSettings.allow_order_no_stock) {
-      return [{ entry, batch: null }];
-    }
-    return [];
-  });
+  };
 
   return (
     <div>
@@ -119,7 +262,8 @@ export default function Marketplace() {
         <div>
           <h1 className="page-title">Place Order</h1>
           <p className="page-sub">
-            Browse shared stock from connected suppliers and place an order.
+            Search and add products from a connected supplier — products are
+            loaded only when you search.
           </p>
         </div>
       </div>
@@ -129,21 +273,6 @@ export default function Marketplace() {
       {catalogNotice && (
         <div className="warning-banner">{catalogNotice}</div>
       )}
-
-      <div className="toolbar">
-        <select
-          value={supplierId}
-          onChange={(e) => loadCatalog(e.target.value)}
-          style={{ maxWidth: 360 }}
-        >
-          <option value="">Select a connected supplier...</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.gensoft_code})
-            </option>
-          ))}
-        </select>
-      </div>
 
       {suppliers.length === 0 && (
         <div className="empty-cta">
@@ -158,8 +287,223 @@ export default function Marketplace() {
         </div>
       )}
 
+      {suppliers.length > 0 && (
+        <div className="order-step-fields">
+          <label className="order-field">
+            <span>
+              Supplier <em className="req">*</em>
+            </span>
+            <select
+              value={supplierId}
+              onChange={(e) => selectSupplier(e.target.value)}
+              required
+            >
+              <option value="">Select supplier...</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.gensoft_code})
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {!supplierId && suppliers.length > 0 && (
+        <p className="muted order-hint">
+          Select a supplier first, then search and select a product.
+        </p>
+      )}
+
       {supplierId && (
-        <div className="panel">
+        <div className="order-search-panel">
+          <div className="stock-legend">
+            <span>
+              <i className="dot ok" /> In stock
+            </span>
+            <span>
+              <i className="dot low" /> Low stock
+            </span>
+            <span>
+              <i className="dot none" /> No stock
+            </span>
+          </div>
+
+          <label className="order-field product-field">
+            <span>
+              Product <em className="req">*</em>
+            </span>
+          </label>
+
+          <div className="order-search-row">
+            <div className="order-search-main">
+              <input
+                ref={searchRef}
+                type="search"
+                className={`order-search-input${selected ? " selected" : ""}`}
+                placeholder="Search & select a product (required)"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelected(null);
+                }}
+                onKeyDown={onSearchKeyDown}
+                autoComplete="off"
+                required
+              />
+              {selected && (
+                <div className="selected-product-chip">
+                  Selected: <strong>{selected.entry.product.name}</strong>
+                  {selected.batch ? ` · Batch ${selected.batch.batch_no}` : ""}
+                </div>
+              )}
+              {searching && <span className="search-hint">Searching…</span>}
+              {!searching && results.length > 0 && (
+                <ul className="order-suggest">
+                  {results.map((row, idx) => {
+                    const avail = row.batch
+                      ? row.batch.stock_hidden
+                        ? null
+                        : row.batch.available_qty
+                      : row.entry.product.total_stock;
+                    const tone = stockTone(avail, row.batch?.stock_hidden);
+                    return (
+                      <li
+                        key={cartKey(row.entry, row.batch)}
+                        className={idx === highlight ? "active" : ""}
+                        onMouseEnter={() => setHighlight(idx)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelected(row);
+                          setQuery(row.entry.product.name);
+                          setResults([]);
+                          setError("");
+                          qtyRef.current?.focus();
+                        }}
+                      >
+                        <i className={`dot ${tone}`} />
+                        <div className="suggest-body">
+                          <strong>{row.entry.product.name}</strong>
+                          <span className="muted">
+                            {row.entry.product.product_code
+                              ? `${row.entry.product.product_code} · `
+                              : ""}
+                            {row.entry.product.manufacturer} ·{" "}
+                            {row.entry.product.pack_size}
+                            {row.batch
+                              ? ` · Batch ${row.batch.batch_no} · Exp ${fmtDate(row.batch.expiry_date)}`
+                              : ""}
+                          </span>
+                        </div>
+                        <div className="suggest-meta">
+                          <span>
+                            {avail === null || avail === undefined
+                              ? "—"
+                              : avail}
+                          </span>
+                          <span>
+                            {inr(
+                              row.batch?.ptr_rate || row.entry.product.ptr_rate
+                            )}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {!searching &&
+                debouncedQ &&
+                results.length === 0 &&
+                !selected && (
+                  <div className="order-suggest empty-suggest">
+                    No products match “{debouncedQ}”
+                  </div>
+                )}
+            </div>
+
+            <input
+              ref={qtyRef}
+              type="number"
+              min="1"
+              className="order-qty-input"
+              value={addQty}
+              onChange={(e) => setAddQty(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (!selected) {
+                    setError(
+                      "Product selection is required. Choose a product from the list."
+                    );
+                    searchRef.current?.focus();
+                    return;
+                  }
+                  addToCart(selected, addQty);
+                }
+              }}
+              title="Quantity"
+            />
+            <button
+              type="button"
+              className="btn order-add-btn"
+              disabled={!selected}
+              onClick={() => {
+                if (!selected) {
+                  setError(
+                    "Product selection is required. Search and choose a product first."
+                  );
+                  searchRef.current?.focus();
+                  return;
+                }
+                addToCart(selected, addQty);
+              }}
+            >
+              +
+            </button>
+          </div>
+
+          <div className="order-search-filters">
+            <label>
+              <input
+                type="checkbox"
+                checked={firstWordExact}
+                onChange={(e) => setFirstWordExact(e.target.checked)}
+              />{" "}
+              First Word Exact Match
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={schemeOnly}
+                onChange={(e) => setSchemeOnly(e.target.checked)}
+              />{" "}
+              Scheme Items Only
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="stockMode"
+                checked={stockMode === "in_stock"}
+                onChange={() => setStockMode("in_stock")}
+              />{" "}
+              In Stock Only
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="stockMode"
+                checked={stockMode === "all"}
+                onChange={() => setStockMode("all")}
+              />{" "}
+              In Stock &amp; Nil Stock
+            </label>
+          </div>
+        </div>
+      )}
+
+      {cartLines.length > 0 && (
+        <div className="panel" style={{ marginTop: 16 }}>
           <table>
             <thead>
               <tr>
@@ -169,62 +513,72 @@ export default function Marketplace() {
                 <th>Avail</th>
                 <th>Scheme</th>
                 <th>PTR</th>
-                <th>MRP</th>
-                <th>Order Qty</th>
+                <th>Qty</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ entry, batch }) => {
-                const key = cartKey(entry, batch);
-                const avail = batch
-                  ? batch.stock_hidden
+              {cartKeys.map((key) => {
+                const l = cart[key];
+                const avail = l.batch
+                  ? l.batch.stock_hidden
                     ? null
-                    : batch.available_qty
-                  : entry.product.total_stock;
-                const low = avail !== null && avail <= 0;
+                    : l.batch.available_qty
+                  : l.entry.product.total_stock;
+                const tone = stockTone(avail, l.batch?.stock_hidden);
                 return (
-                  <tr key={key} className={low ? "out-of-stock-row" : ""}>
+                  <tr
+                    key={key}
+                    className={tone === "none" ? "out-of-stock-row" : ""}
+                  >
                     <td>
-                      <strong>{entry.product.name}</strong>
+                      <strong>{l.entry.product.name}</strong>
                       <div className="muted">
-                        {entry.product.manufacturer} · {entry.product.pack_size}
+                        {l.entry.product.manufacturer} ·{" "}
+                        {l.entry.product.pack_size}
                       </div>
                     </td>
-                    <td>{batch?.batch_no || "—"}</td>
-                    <td>{batch ? fmtDate(batch.expiry_date) : "—"}</td>
-                    <td className={low ? "low-stock" : ""}>
-                      {avail === null ? "—" : avail}
+                    <td>{l.batch?.batch_no || "—"}</td>
+                    <td>{l.batch ? fmtDate(l.batch.expiry_date) : "—"}</td>
+                    <td className={tone === "low" || tone === "none" ? "low-stock" : ""}>
+                      <i className={`dot ${tone}`} />{" "}
+                      {avail === null || avail === undefined ? "—" : avail}
                     </td>
-                    <td>{batch?.scheme_hidden ? "—" : batch?.scheme || "—"}</td>
-                    <td>{inr(batch?.ptr_rate || entry.product.ptr_rate)}</td>
-                    <td>{inr(batch?.mrp || entry.product.mrp)}</td>
+                    <td>
+                      {l.batch?.scheme_hidden ? "—" : l.batch?.scheme || "—"}
+                    </td>
+                    <td>{inr(l.batch?.ptr_rate || l.entry.product.ptr_rate)}</td>
                     <td>
                       <input
                         type="number"
-                        min="0"
-                        max={
-                          supplierSettings.allow_order_over_stock || avail === null
-                            ? undefined
-                            : avail || undefined
-                        }
-                        value={cart[key]?.qty || ""}
-                        onChange={(e) => setQty(entry, batch, e.target.value)}
-                        style={{ width: 80 }}
+                        min="1"
+                        value={l.qty}
+                        onChange={(e) => setLineQty(key, e.target.value)}
+                        style={{ width: 72 }}
                       />
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn secondary sm"
+                        onClick={() => removeLine(key)}
+                      >
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 );
               })}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="empty">
-                    No shared stock available from this supplier.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
+      )}
+
+      {supplierId && cartLines.length === 0 && (
+        <p className="muted" style={{ marginTop: 20, textAlign: "center" }}>
+          Product selection is required — search, choose a product from the
+          list, enter qty, then press +.
+        </p>
       )}
 
       {cartLines.length > 0 && (
