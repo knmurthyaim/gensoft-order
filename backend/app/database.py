@@ -50,6 +50,7 @@ def migrate_db():
         ("products", "is_on_hold", "BOOLEAN", "0", "false"),
         ("products", "product_code", "VARCHAR", "''", "''"),
         ("orders", "remarks", "VARCHAR", "''", "''"),
+        ("users", "sales_rep_id", "INTEGER", None, None),
     ]
 
     with engine.begin() as conn:

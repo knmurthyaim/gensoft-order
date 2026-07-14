@@ -8,7 +8,8 @@ export default function TopNav() {
   const [showPassword, setShowPassword] = useState(false);
   const isDistributor =
     account?.account_type === "distributor" ||
-    account?.account_type === "sub_distributor";
+    account?.account_type === "sub_distributor" ||
+    account?.account_type === "stockist";
 
   const tabs = [
     { to: "/", label: "Dashboard", end: true },
@@ -22,7 +23,7 @@ export default function TopNav() {
     { to: "/stock", label: "Stock", show: isDistributor },
     { to: "/parties", label: "Parties" },
     { to: "/outstanding", label: "Outstanding" },
-    { to: "/sales-reps", label: "Sales Reps" },
+    { to: "/sales-reps", label: "Sales Reps", show: isDistributor },
     { to: "/connections", label: "Connections" },
     { to: "/import", label: "Import", show: isDistributor },
     { to: "/settings", label: "Settings", show: isDistributor },

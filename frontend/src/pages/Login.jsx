@@ -6,6 +6,7 @@ const DEMO = [
   { u: "balaji", label: "Balaji Agencies (Distributor)" },
   { u: "dattha", label: "Sri Dattha Pharmacy (Retailer)" },
   { u: "vasavi", label: "Vasavi Medical (Retailer)" },
+  { u: "naresh", label: "M Naresh (Sales Rep app)" },
 ];
 
 export default function Login() {

@@ -168,11 +168,12 @@ def get_sales_reps(db: Session, account: models.Account, search: Optional[str] =
     )
     if search:
         q = q.filter(models.SalesRep.name.ilike(f"%{search}%"))
-    return q.order_by(models.SalesRep.name).all()
+    reps = q.order_by(models.SalesRep.name).all()
+    return [_enrich_sales_rep(db, r) for r in reps]
 
 
 def get_sales_rep(db: Session, account: models.Account, rep_id: int):
-    return (
+    obj = (
         db.query(models.SalesRep)
         .filter(
             models.SalesRep.id == rep_id,
@@ -180,31 +181,155 @@ def get_sales_rep(db: Session, account: models.Account, rep_id: int):
         )
         .first()
     )
+    return _enrich_sales_rep(db, obj) if obj else None
+
+
+def _enrich_sales_rep(db: Session, rep: models.SalesRep | None):
+    if not rep:
+        return None
+    user = (
+        db.query(models.User)
+        .filter(models.User.sales_rep_id == rep.id)
+        .first()
+    )
+    rep.username = user.username if user else None
+    rep.has_login = bool(user)
+    return rep
+
+
+def _set_sales_rep_login(
+    db: Session,
+    account: models.Account,
+    rep: models.SalesRep,
+    username: Optional[str],
+    password: Optional[str],
+):
+    username = (username or "").strip()
+    password = password or ""
+    if not username and not password:
+        return
+    if username and not password:
+        # updating username only requires existing user + password for new
+        existing = (
+            db.query(models.User)
+            .filter(models.User.sales_rep_id == rep.id)
+            .first()
+        )
+        if not existing:
+            raise AppError("Password is required to create app login")
+        clash = (
+            db.query(models.User)
+            .filter(models.User.username == username, models.User.id != existing.id)
+            .first()
+        )
+        if clash:
+            raise AppError(f"Username '{username}' already exists")
+        existing.username = username
+        return
+
+    if password and not username:
+        existing = (
+            db.query(models.User)
+            .filter(models.User.sales_rep_id == rep.id)
+            .first()
+        )
+        if not existing:
+            raise AppError("Username is required to create app login")
+        existing.password_hash = hash_password(password)
+        return
+
+    # both provided — create or update
+    clash = (
+        db.query(models.User)
+        .filter(models.User.username == username)
+        .first()
+    )
+    existing = (
+        db.query(models.User)
+        .filter(models.User.sales_rep_id == rep.id)
+        .first()
+    )
+    if clash and (not existing or clash.id != existing.id):
+        raise AppError(f"Username '{username}' already exists")
+    if existing:
+        existing.username = username
+        existing.password_hash = hash_password(password)
+        existing.name = rep.name
+        existing.is_active = True
+    else:
+        db.add(
+            models.User(
+                username=username,
+                password_hash=hash_password(password),
+                name=rep.name,
+                role="rep",
+                account_id=account.id,
+                sales_rep_id=rep.id,
+                is_active=True,
+            )
+        )
 
 
 def create_sales_rep(db: Session, account: models.Account, data: schemas.SalesRepCreate):
-    obj = models.SalesRep(owner_account_id=account.id, **data.model_dump())
+    if account.account_type not in ("distributor", "sub_distributor", "stockist"):
+        raise AppError("Only distributors can manage sales reps")
+    payload = data.model_dump(exclude={"username", "password"})
+    obj = models.SalesRep(owner_account_id=account.id, **payload)
     db.add(obj)
+    db.flush()
+    try:
+        _set_sales_rep_login(db, account, obj, data.username, data.password)
+    except AppError:
+        db.rollback()
+        raise
     db.commit()
     db.refresh(obj)
-    return obj
+    return _enrich_sales_rep(db, obj)
 
 
 def update_sales_rep(db: Session, account, rep_id, data: schemas.SalesRepUpdate):
-    obj = get_sales_rep(db, account, rep_id)
+    obj = (
+        db.query(models.SalesRep)
+        .filter(
+            models.SalesRep.id == rep_id,
+            models.SalesRep.owner_account_id == account.id,
+        )
+        .first()
+    )
     if not obj:
         return None
-    for k, v in data.model_dump(exclude_unset=True).items():
+    for k, v in data.model_dump(exclude_unset=True, exclude={"username", "password"}).items():
         setattr(obj, k, v)
+    if data.username is not None or data.password is not None:
+        _set_sales_rep_login(
+            db,
+            account,
+            obj,
+            data.username if data.username is not None else None,
+            data.password if data.password is not None else None,
+        )
     db.commit()
     db.refresh(obj)
-    return obj
+    return _enrich_sales_rep(db, obj)
 
 
 def delete_sales_rep(db: Session, account, rep_id) -> bool:
-    obj = get_sales_rep(db, account, rep_id)
+    obj = (
+        db.query(models.SalesRep)
+        .filter(
+            models.SalesRep.id == rep_id,
+            models.SalesRep.owner_account_id == account.id,
+        )
+        .first()
+    )
     if not obj:
         return False
+    db.query(models.User).filter(models.User.sales_rep_id == obj.id).delete(
+        synchronize_session=False
+    )
+    db.query(models.Party).filter(models.Party.sales_rep_id == obj.id).update(
+        {models.Party.sales_rep_id: None}, synchronize_session=False
+    )
     db.delete(obj)
     db.commit()
     return True
@@ -653,6 +778,288 @@ def search_products_across_suppliers(
         )
     )
     return results[:limit]
+
+
+def get_rep_customers(
+    db: Session, user: models.User, search: Optional[str] = None
+):
+    if user.role != "rep" or not user.sales_rep_id:
+        raise AppError("Sales rep login required")
+    q = db.query(models.Party).filter(
+        models.Party.owner_account_id == user.account_id,
+        models.Party.sales_rep_id == user.sales_rep_id,
+        models.Party.party_type == "customer",
+    )
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Party.name.ilike(term),
+                models.Party.code.ilike(term),
+                models.Party.area.ilike(term),
+                models.Party.city.ilike(term),
+            )
+        )
+    return q.order_by(models.Party.name).all()
+
+
+def get_rep_catalog(
+    db: Session,
+    user: models.User,
+    search: Optional[str] = None,
+    limit: int = 40,
+    in_stock_only: bool = False,
+    first_word_exact: bool = False,
+    scheme_only: bool = False,
+):
+    """Sales rep browses their own distributor stock (not other suppliers)."""
+    if user.role != "rep" or not user.sales_rep_id or not user.account_id:
+        raise AppError("Sales rep login required")
+    distributor = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not distributor:
+        raise AppError("Distributor account not found")
+
+    term = (search or "").strip()
+    if not term:
+        return [], get_distributor_settings(distributor)
+
+    allow_no_stock = bool(distributor.allow_order_no_stock)
+    include_nil = not in_stock_only
+    limit = max(1, min(int(limit or 40), 100))
+    hide_hold = bool(distributor.hide_hold_products_from_salesrep)
+
+    q = db.query(models.Product).filter(
+        models.Product.owner_account_id == distributor.id,
+    )
+    if hide_hold:
+        q = q.filter(models.Product.is_on_hold.isnot(True))
+    if first_word_exact:
+        first = term.split()[0]
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(f"{first} %"),
+                models.Product.name.ilike(first),
+                models.Product.product_code.ilike(first),
+            )
+        )
+    else:
+        like = f"%{term}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(like),
+                models.Product.product_code.ilike(like),
+                models.Product.manufacturer.ilike(like),
+            )
+        )
+
+    products = q.order_by(models.Product.name).limit(limit * 3).all()
+    settings = get_distributor_settings(distributor)
+    result = []
+    for p in products:
+        visible = [
+            b
+            for b in p.stock_batches
+            if b.show_to_customer
+            and (b.available_qty > 0 or include_nil or allow_no_stock)
+            and (not scheme_only or (b.scheme or "").strip())
+        ]
+        if in_stock_only:
+            visible = [b for b in visible if b.available_qty > 0]
+        _attach_stock(p)
+        if visible or ((include_nil or allow_no_stock) and not scheme_only):
+            result.append({"product": p, "batches": visible if visible else []})
+        if len(result) >= limit:
+            break
+    return result, settings
+
+
+def create_rep_order(
+    db: Session, user: models.User, data: schemas.RepOrderCreate
+):
+    if user.role != "rep" or not user.sales_rep_id or not user.account_id:
+        raise AppError("Sales rep login required")
+    distributor = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not distributor:
+        raise AppError("Distributor account not found")
+
+    party = (
+        db.query(models.Party)
+        .filter(
+            models.Party.id == data.party_id,
+            models.Party.owner_account_id == distributor.id,
+            models.Party.sales_rep_id == user.sales_rep_id,
+        )
+        .first()
+    )
+    if not party:
+        raise AppError("Customer not found or not assigned to you")
+
+    # Place order as the linked retailer when available; otherwise attribute to party
+    buyer_id = party.linked_account_id or distributor.id
+    order_data = schemas.OrderCreate(
+        supplier_account_id=distributor.id,
+        sales_rep_id=user.sales_rep_id,
+        source="app",
+        notes=data.notes or "",
+        items=data.items,
+    )
+    # Inline create with forced buyer/party (create_order uses logged-in as buyer)
+    return _create_order_as(
+        db,
+        viewer_account_id=distributor.id,
+        buyer_account_id=buyer_id,
+        party=party,
+        sales_rep_id=user.sales_rep_id,
+        data=order_data,
+    )
+
+
+def _create_order_as(
+    db: Session,
+    viewer_account_id: int,
+    buyer_account_id: int,
+    party: Optional[models.Party],
+    sales_rep_id: Optional[int],
+    data: schemas.OrderCreate,
+):
+    supplier_id = data.supplier_account_id
+    supplier = (
+        db.query(models.Account).filter(models.Account.id == supplier_id).first()
+    )
+    if not supplier:
+        raise AppError("Supplier not found")
+    if not data.items:
+        raise AppError("Order must contain at least one item")
+
+    allow_no_stock = bool(supplier.allow_order_no_stock)
+    allow_over_stock = bool(supplier.allow_order_over_stock)
+
+    order = models.Order(
+        buyer_account_id=buyer_account_id,
+        supplier_account_id=supplier_id,
+        party_id=party.id if party else None,
+        sales_rep_id=sales_rep_id,
+        source=data.source,
+        notes=data.notes,
+        status="received",
+    )
+
+    total = 0.0
+    gst_total = 0.0
+    items = []
+    for item in data.items:
+        product = (
+            db.query(models.Product)
+            .filter(
+                models.Product.id == item.product_id,
+                models.Product.owner_account_id == supplier_id,
+            )
+            .first()
+        )
+        if not product:
+            raise AppError(f"Product {item.product_id} not available")
+
+        rate = item.rate if item.rate is not None else product.ptr_rate
+        gst_pct = product.gst_pct
+
+        if item.batch_id:
+            batch = (
+                db.query(models.StockBatch)
+                .filter(
+                    models.StockBatch.id == item.batch_id,
+                    models.StockBatch.owner_account_id == supplier_id,
+                )
+                .first()
+            )
+            if not batch:
+                raise AppError(f"Batch {item.batch_id} not found")
+            needed = item.qty + item.free_qty
+            if batch.available_qty < needed and not allow_over_stock:
+                if batch.available_qty <= 0 and not allow_no_stock:
+                    raise AppError(f"No stock for '{product.name}'.")
+                raise AppError(
+                    f"Insufficient stock for '{product.name}' "
+                    f"(available: {batch.available_qty})"
+                )
+            if batch.available_qty > 0:
+                deduct = (
+                    min(batch.available_qty, needed) if allow_over_stock else needed
+                )
+                batch.available_qty -= deduct
+            if item.rate is None:
+                rate = batch.ptr_rate or product.ptr_rate
+        else:
+            total_stock = sum(
+                b.available_qty
+                for b in product.stock_batches
+                if b.show_to_customer
+            )
+            if total_stock <= 0 and not allow_no_stock:
+                raise AppError(f"'{product.name}' is out of stock.")
+            if item.qty > total_stock and total_stock > 0 and not allow_over_stock:
+                raise AppError(
+                    f"Insufficient stock for '{product.name}' "
+                    f"(available: {total_stock})"
+                )
+
+        taxable = max(rate * item.qty - item.scheme_discount, 0.0)
+        gst_amount = round(taxable * gst_pct / 100, 2)
+        line_total = round(taxable + gst_amount, 2)
+        total += line_total
+        gst_total += gst_amount
+        items.append(
+            models.OrderItem(
+                product_id=product.id,
+                batch_id=item.batch_id,
+                qty=item.qty,
+                free_qty=item.free_qty,
+                rate=rate,
+                scheme_discount=item.scheme_discount,
+                gst_pct=gst_pct,
+                gst_amount=gst_amount,
+                line_total=line_total,
+            )
+        )
+
+    order.items = items
+    order.total_amount = round(total, 2)
+    order.gst_amount = round(gst_total, 2)
+
+    min_val = float(supplier.minimum_order_value or 0)
+    if min_val > 0:
+        exempt = party and party.min_order_exempt
+        if not exempt and order.total_amount < min_val:
+            raise AppError(
+                f"Minimum order value is ₹{min_val:.2f}. "
+                f"Your order total is ₹{order.total_amount:.2f}."
+            )
+
+    if party:
+        party.outstanding_balance = round(
+            (party.outstanding_balance or 0.0) + order.total_amount, 2
+        )
+    db.add(order)
+    db.flush()
+    order.order_no = f"GS{order.id:06d}"
+    db.commit()
+    db.refresh(order)
+    return _enrich_order(order, viewer_account_id)
+
+
+def get_rep_orders(db: Session, user: models.User):
+    if user.role != "rep" or not user.sales_rep_id:
+        raise AppError("Sales rep login required")
+    orders = (
+        db.query(models.Order)
+        .filter(models.Order.sales_rep_id == user.sales_rep_id)
+        .order_by(models.Order.created_at.desc())
+        .all()
+    )
+    return [_enrich_order(o, user.account_id) for o in orders]
 
 
 # ---------- Orders ----------

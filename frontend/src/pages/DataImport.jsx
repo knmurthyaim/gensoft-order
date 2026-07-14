@@ -36,7 +36,8 @@ export default function DataImport() {
   const { account } = useAuth();
   const isDistributor =
     account?.account_type === "distributor" ||
-    account?.account_type === "sub_distributor";
+    account?.account_type === "sub_distributor" ||
+    account?.account_type === "stockist";
 
   if (!isDistributor) {
     return (

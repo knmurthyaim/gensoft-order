@@ -14,6 +14,7 @@ from .routers import (
     outstanding,
     parties,
     products,
+    rep,
     salesreps,
     settings,
 )
@@ -93,6 +94,7 @@ app.include_router(products.router)
 app.include_router(batches.router)
 app.include_router(connections.router)
 app.include_router(marketplace.router)
+app.include_router(rep.router)
 app.include_router(orders.router)
 app.include_router(outstanding.router)
 app.include_router(settings.router)

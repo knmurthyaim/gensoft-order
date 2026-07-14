@@ -75,6 +75,7 @@ export default function CrudPage({
         if (f.type === "fk")
           v = v === "" ? null : parseInt(v, 10);
         if (f.type === "boolean") v = v === true || v === "true" || v === "yes";
+        if (f.type === "password" && editing && !v) return;
         payload[f.name] = v;
       });
       if (editing) await resource.update(editing.id, payload);
@@ -208,9 +209,23 @@ export default function CrudPage({
                     </select>
                   ) : (
                     <input
-                      type={f.type === "number" ? "number" : "text"}
+                      type={
+                        f.type === "number"
+                          ? "number"
+                          : f.type === "password"
+                            ? "password"
+                            : "text"
+                      }
                       step={f.type === "number" ? "0.01" : undefined}
-                      required={f.required}
+                      required={f.required && !editing}
+                      autoComplete={
+                        f.type === "password" ? "new-password" : undefined
+                      }
+                      placeholder={
+                        f.type === "password" && editing
+                          ? "Leave blank to keep current"
+                          : undefined
+                      }
                       value={form[f.name] ?? ""}
                       onChange={(e) =>
                         setForm({ ...form, [f.name]: e.target.value })

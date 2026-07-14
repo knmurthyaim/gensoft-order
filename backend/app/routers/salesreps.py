@@ -25,7 +25,10 @@ def create_rep(
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    return crud.create_sales_rep(db, account, data)
+    try:
+        return crud.create_sales_rep(db, account, data)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.put("/{rep_id}", response_model=schemas.SalesRep)
@@ -35,7 +38,10 @@ def update_rep(
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    obj = crud.update_sales_rep(db, account, rep_id, data)
+    try:
+        obj = crud.update_sales_rep(db, account, rep_id, data)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not obj:
         raise HTTPException(status_code=404, detail="Sales rep not found")
     return obj

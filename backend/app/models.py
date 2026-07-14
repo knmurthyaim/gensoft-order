@@ -27,7 +27,7 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     gensoft_code = Column(String, unique=True, index=True, nullable=False)
-    account_type = Column(String, default="retailer")  # distributor, retailer, sub_distributor
+    account_type = Column(String, default="retailer")  # distributor, retailer, sub_distributor, stockist
     name = Column(String, nullable=False, index=True)
     owner_name = Column(String, default="")
     address = Column(String, default="")
@@ -68,10 +68,12 @@ class User(Base):
     name = Column(String, default="")
     role = Column(String, default="owner")  # platform_admin, owner, rep
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    sales_rep_id = Column(Integer, ForeignKey("sales_reps.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
 
     account = relationship("Account", back_populates="users")
+    sales_rep = relationship("SalesRep", foreign_keys=[sales_rep_id])
 
 
 class Party(Base):

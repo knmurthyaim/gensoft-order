@@ -162,6 +162,16 @@ export const marketplace = {
     api.get(`/marketplace/products/search`, { params }).then((r) => r.data),
 };
 
+export const repApi = {
+  customers: (params) =>
+    api.get("/rep/customers", { params }).then((r) => r.data),
+  catalog: (params) =>
+    api.get("/rep/catalog", { params }).then((r) => r.data),
+  createOrder: (data) =>
+    api.post("/rep/orders", data).then((r) => r.data),
+  orders: () => api.get("/rep/orders").then((r) => r.data),
+};
+
 export const settings = {
   get: () => api.get("/settings").then((r) => r.data),
   update: (data) => api.put("/settings", data).then((r) => r.data),

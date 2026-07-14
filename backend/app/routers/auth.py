@@ -36,10 +36,17 @@ def change_password(
 @router.get("/me", response_model=schemas.Me)
 def me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     account = None
+    sales_rep = None
     if user.account_id:
         account = (
             db.query(models.Account)
             .filter(models.Account.id == user.account_id)
             .first()
         )
-    return schemas.Me(user=user, account=account)
+    if user.sales_rep_id:
+        sales_rep = (
+            db.query(models.SalesRep)
+            .filter(models.SalesRep.id == user.sales_rep_id)
+            .first()
+        )
+    return schemas.Me(user=user, account=account, sales_rep=sales_rep)

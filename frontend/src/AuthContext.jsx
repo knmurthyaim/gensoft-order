@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [account, setAccount] = useState(null);
+  const [salesRep, setSalesRep] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const loadMe = async () => {
@@ -13,9 +14,11 @@ export function AuthProvider({ children }) {
       const data = await auth.me();
       setUser(data.user);
       setAccount(data.account);
+      setSalesRep(data.sales_rep || null);
     } catch {
       setUser(null);
       setAccount(null);
+      setSalesRep(null);
       tokenStore.clear();
     } finally {
       setLoading(false);
@@ -27,6 +30,7 @@ export function AuthProvider({ children }) {
       tokenStore.clear();
       setUser(null);
       setAccount(null);
+      setSalesRep(null);
     });
     if (tokenStore.get()) {
       loadMe();
@@ -45,11 +49,20 @@ export function AuthProvider({ children }) {
     tokenStore.clear();
     setUser(null);
     setAccount(null);
+    setSalesRep(null);
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, account, loading, login, logout, refresh: loadMe }}
+      value={{
+        user,
+        account,
+        salesRep,
+        loading,
+        login,
+        logout,
+        refresh: loadMe,
+      }}
     >
       {children}
     </AuthContext.Provider>

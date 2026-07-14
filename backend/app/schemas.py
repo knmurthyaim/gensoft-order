@@ -96,11 +96,13 @@ class User(BaseModel):
     name: str
     role: str
     account_id: Optional[int]
+    sales_rep_id: Optional[int] = None
 
 
 class Me(BaseModel):
     user: User
     account: Optional[Account] = None
+    sales_rep: Optional["SalesRep"] = None
 
 
 # ---------- Sales Rep ----------
@@ -111,13 +113,16 @@ class SalesRepBase(BaseModel):
 
 
 class SalesRepCreate(SalesRepBase):
-    pass
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 
 class SalesRepUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 
 class SalesRep(SalesRepBase):
@@ -126,6 +131,8 @@ class SalesRep(SalesRepBase):
     id: int
     owner_account_id: int
     created_at: datetime
+    username: Optional[str] = None
+    has_login: bool = False
 
 
 # ---------- Party ----------
@@ -288,6 +295,12 @@ class OrderItemCreate(BaseModel):
     free_qty: int = Field(ge=0, default=0)
     rate: Optional[float] = None
     scheme_discount: float = Field(ge=0, default=0.0)
+
+
+class RepOrderCreate(BaseModel):
+    party_id: int
+    items: List[OrderItemCreate]
+    notes: str = ""
 
 
 class OrderItem(BaseModel):

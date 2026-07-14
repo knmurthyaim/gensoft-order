@@ -377,6 +377,7 @@ function AccountForm({ form, setForm, includeLogin = false }) {
           onChange={(e) => setForm({ ...form, account_type: e.target.value })}
         >
           <option value="retailer">Retailer</option>
+          <option value="stockist">Stockist</option>
           <option value="distributor">Distributor</option>
           <option value="sub_distributor">Sub-Distributor</option>
         </select>

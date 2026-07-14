@@ -15,6 +15,12 @@ import Connections from "./pages/Connections.jsx";
 import Settings from "./pages/Settings.jsx";
 import Outstanding from "./pages/Outstanding.jsx";
 import DataImport from "./pages/DataImport.jsx";
+import {
+  RepCustomers,
+  RepOrder,
+  RepOrders,
+  RepShell,
+} from "./pages/RepApp.jsx";
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -36,6 +42,21 @@ export default function App() {
     );
   }
 
+  // Sales rep — limited mobile app (assigned customers + distributor stock)
+  if (user.role === "rep") {
+    return (
+      <RepShell>
+        <Routes>
+          <Route path="/rep" element={<RepCustomers />} />
+          <Route path="/rep/order/:partyId" element={<RepOrder />} />
+          <Route path="/rep/orders" element={<RepOrders />} />
+          <Route path="*" element={<Navigate to="/rep" replace />} />
+        </Routes>
+      </RepShell>
+    );
+  }
+
+  // Distributor / stockist / retailer / sub-distributor — full app
   return (
     <div className="zennx-app">
       <TopNav />
