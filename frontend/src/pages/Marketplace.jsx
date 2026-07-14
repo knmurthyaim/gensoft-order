@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getDirectory, marketplace, orders as ordersApi } from "../api";
-import { fmtDate, inr } from "../format";
+import { inr } from "../format";
 
 const defaultSettings = {
   allow_order_no_stock: false,
@@ -121,18 +121,53 @@ export default function Marketplace() {
       .then((data) => {
         if (cancelled) return;
         setSupplierSettings(data.settings || defaultSettings);
-        const flat = [];
-        for (const entry of data.items || []) {
-          if (entry.batches?.length) {
-            for (const batch of entry.batches) {
-              flat.push({ entry, batch });
+        // One row per product: sum stock qty, use latest batch MRP/PTR
+        const rows = (data.items || []).map((entry) => {
+          const batches = entry.batches || [];
+          const stockHidden = batches.some((b) => b.stock_hidden);
+          const sumQty = stockHidden
+            ? null
+            : batches.reduce((s, b) => s + (Number(b.available_qty) || 0), 0);
+
+          let latest = null;
+          for (const b of batches) {
+            if (!latest) {
+              latest = b;
+              continue;
             }
-          } else {
-            // Product with no batch — still selectable
-            flat.push({ entry, batch: null });
+            const a = b.expiry_date || "";
+            const c = latest.expiry_date || "";
+            // Prefer furthest expiry (newest usable stock); if tie/missing, higher id
+            if (a && c) {
+              if (a > c) latest = b;
+              else if (a === c && (b.id || 0) > (latest.id || 0)) latest = b;
+            } else if (!c && a) {
+              latest = b;
+            } else if (!a && !c && (b.id || 0) > (latest.id || 0)) {
+              latest = b;
+            }
           }
-        }
-        setResults(flat);
+
+          const scheme = latest?.scheme_hidden
+            ? ""
+            : (latest?.scheme || "").trim() ||
+              batches.map((b) => b.scheme).find((s) => (s || "").trim()) ||
+              "";
+
+          return {
+            entry,
+            batch: null, // order by product; no batch split in UI
+            aggregate: {
+              available_qty: sumQty,
+              stock_hidden: stockHidden,
+              mrp: latest?.mrp ?? entry.product.mrp,
+              ptr_rate: latest?.ptr_rate ?? entry.product.ptr_rate,
+              scheme,
+              batch_count: batches.length,
+            },
+          };
+        });
+        setResults(rows);
         setHighlight(0);
       })
       .catch((err) => {
@@ -147,8 +182,7 @@ export default function Marketplace() {
     };
   }, [supplierId, debouncedQ, stockMode, firstWordExact, schemeOnly]);
 
-  const cartKey = (entry, batch) =>
-    batch ? `b-${batch.id}` : `p-${entry.product.id}`;
+  const cartKey = (entry) => `p-${entry.product.id}`;
 
   const addToCart = (row, qtyRaw) => {
     if (!row) {
@@ -162,12 +196,10 @@ export default function Marketplace() {
       qtyRef.current?.focus();
       return;
     }
-    const { entry, batch } = row;
-    const avail = batch
-      ? batch.stock_hidden
-        ? null
-        : batch.available_qty
-      : entry.product.total_stock;
+    const { entry, aggregate } = row;
+    const avail = aggregate?.stock_hidden
+      ? null
+      : aggregate?.available_qty ?? entry.product.total_stock;
     if (
       avail !== null &&
       avail !== undefined &&
@@ -182,10 +214,13 @@ export default function Marketplace() {
       setError("This product has no stock.");
       return;
     }
-    const key = cartKey(entry, batch);
+    const key = cartKey(entry);
     setCart((c) => {
       const prev = c[key]?.qty || 0;
-      return { ...c, [key]: { qty: prev + n, entry, batch } };
+      return {
+        ...c,
+        [key]: { qty: prev + n, entry, batch: null, aggregate },
+      };
     });
     setError("");
     setSelected(null);
@@ -220,7 +255,10 @@ export default function Marketplace() {
   const total = useMemo(
     () =>
       cartLines.reduce((sum, l) => {
-        const rate = l.batch?.ptr_rate || l.entry.product.ptr_rate;
+        const rate =
+          l.aggregate?.ptr_rate ||
+          l.batch?.ptr_rate ||
+          l.entry.product.ptr_rate;
         const taxable = rate * l.qty;
         return sum + taxable + (taxable * l.entry.product.gst_pct) / 100;
       }, 0),
@@ -237,8 +275,9 @@ export default function Marketplace() {
         source: "web",
         items: cartLines.map((l) => ({
           product_id: l.entry.product.id,
-          batch_id: l.batch?.id || null,
+          batch_id: null,
           qty: l.qty,
+          rate: l.aggregate?.ptr_rate ?? undefined,
         })),
       });
       setNotice("Order placed successfully.");
@@ -371,7 +410,9 @@ export default function Marketplace() {
               {selected && (
                 <div className="selected-product-chip">
                   Selected: <strong>{selected.entry.product.name}</strong>
-                  {selected.batch ? ` · Batch ${selected.batch.batch_no}` : ""}
+                  {selected.aggregate?.available_qty != null
+                    ? ` · Avl ${selected.aggregate.available_qty}`
+                    : ""}
                 </div>
               )}
               {searching && <span className="search-hint">Searching…</span>}
@@ -385,21 +426,22 @@ export default function Marketplace() {
                     <span className="suggest-col-price">PTR</span>
                   </li>
                   {results.map((row, idx) => {
-                    const avail = row.batch
-                      ? row.batch.stock_hidden
-                        ? null
-                        : row.batch.available_qty
-                      : row.entry.product.total_stock;
-                    const tone = stockTone(avail, row.batch?.stock_hidden);
-                    const scheme = row.batch?.scheme_hidden
-                      ? ""
-                      : row.batch?.scheme || "";
-                    const mrp = row.batch?.mrp || row.entry.product.mrp;
+                    const avail = row.aggregate?.stock_hidden
+                      ? null
+                      : row.aggregate?.available_qty ??
+                        row.entry.product.total_stock;
+                    const tone = stockTone(
+                      avail,
+                      row.aggregate?.stock_hidden
+                    );
+                    const scheme = row.aggregate?.scheme || "";
+                    const mrp =
+                      row.aggregate?.mrp ?? row.entry.product.mrp;
                     const ptr =
-                      row.batch?.ptr_rate || row.entry.product.ptr_rate;
+                      row.aggregate?.ptr_rate ?? row.entry.product.ptr_rate;
                     return (
                       <li
-                        key={cartKey(row.entry, row.batch)}
+                        key={cartKey(row.entry)}
                         className={idx === highlight ? "active" : ""}
                         onMouseEnter={() => setHighlight(idx)}
                         onMouseDown={(e) => {
@@ -420,8 +462,8 @@ export default function Marketplace() {
                             {row.entry.product.pack_size
                               ? ` · ${row.entry.product.pack_size}`
                               : ""}
-                            {row.batch
-                              ? ` · ${row.batch.batch_no} · Exp ${fmtDate(row.batch.expiry_date)}`
+                            {row.aggregate?.batch_count > 1
+                              ? ` · ${row.aggregate.batch_count} batches`
                               : ""}
                           </span>
                         </div>
@@ -542,10 +584,9 @@ export default function Marketplace() {
             <thead>
               <tr>
                 <th>Product</th>
-                <th>Batch</th>
-                <th>Expiry</th>
                 <th>Avail</th>
                 <th>Scheme</th>
+                <th>MRP</th>
                 <th>PTR</th>
                 <th>Qty</th>
                 <th></th>
@@ -554,12 +595,10 @@ export default function Marketplace() {
             <tbody>
               {cartKeys.map((key) => {
                 const l = cart[key];
-                const avail = l.batch
-                  ? l.batch.stock_hidden
-                    ? null
-                    : l.batch.available_qty
-                  : l.entry.product.total_stock;
-                const tone = stockTone(avail, l.batch?.stock_hidden);
+                const avail = l.aggregate?.stock_hidden
+                  ? null
+                  : l.aggregate?.available_qty ?? l.entry.product.total_stock;
+                const tone = stockTone(avail, l.aggregate?.stock_hidden);
                 return (
                   <tr
                     key={key}
@@ -572,16 +611,19 @@ export default function Marketplace() {
                         {l.entry.product.pack_size}
                       </div>
                     </td>
-                    <td>{l.batch?.batch_no || "—"}</td>
-                    <td>{l.batch ? fmtDate(l.batch.expiry_date) : "—"}</td>
                     <td className={tone === "low" || tone === "none" ? "low-stock" : ""}>
                       <i className={`dot ${tone}`} />{" "}
                       {avail === null || avail === undefined ? "—" : avail}
                     </td>
+                    <td>{l.aggregate?.scheme || "—"}</td>
                     <td>
-                      {l.batch?.scheme_hidden ? "—" : l.batch?.scheme || "—"}
+                      {inr(l.aggregate?.mrp ?? l.entry.product.mrp)}
                     </td>
-                    <td>{inr(l.batch?.ptr_rate || l.entry.product.ptr_rate)}</td>
+                    <td>
+                      {inr(
+                        l.aggregate?.ptr_rate ?? l.entry.product.ptr_rate
+                      )}
+                    </td>
                     <td>
                       <input
                         type="number"
