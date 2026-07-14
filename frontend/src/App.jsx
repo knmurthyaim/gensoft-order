@@ -19,7 +19,9 @@ import {
   RepCustomers,
   RepOrder,
   RepOrders,
+  RepOutstanding,
   RepShell,
+  RepStock,
 } from "./pages/RepApp.jsx";
 
 export default function App() {
@@ -42,13 +44,15 @@ export default function App() {
     );
   }
 
-  // Sales rep — limited mobile app (assigned customers + distributor stock)
+  // Sales rep — parties (all), stock, outstanding, own orders only
   if (user.role === "rep") {
     return (
       <RepShell>
         <Routes>
           <Route path="/rep" element={<RepCustomers />} />
           <Route path="/rep/order/:partyId" element={<RepOrder />} />
+          <Route path="/rep/stock" element={<RepStock />} />
+          <Route path="/rep/outstanding" element={<RepOutstanding />} />
           <Route path="/rep/orders" element={<RepOrders />} />
           <Route path="*" element={<Navigate to="/rep" replace />} />
         </Routes>

@@ -167,6 +167,10 @@ export const repApi = {
     api.get("/rep/customers", { params }).then((r) => r.data),
   catalog: (params) =>
     api.get("/rep/catalog", { params }).then((r) => r.data),
+  stock: (params) =>
+    api.get("/rep/stock", { params }).then((r) => r.data),
+  outstanding: (params) =>
+    api.get("/rep/outstanding", { params }).then((r) => r.data),
   createOrder: (data) =>
     api.post("/rep/orders", data).then((r) => r.data),
   orders: () => api.get("/rep/orders").then((r) => r.data),

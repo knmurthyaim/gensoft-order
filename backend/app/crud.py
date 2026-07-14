@@ -783,11 +783,11 @@ def search_products_across_suppliers(
 def get_rep_customers(
     db: Session, user: models.User, search: Optional[str] = None
 ):
+    """All parties in the distributor party master (not only assigned)."""
     if user.role != "rep" or not user.sales_rep_id:
         raise AppError("Sales rep login required")
     q = db.query(models.Party).filter(
         models.Party.owner_account_id == user.account_id,
-        models.Party.sales_rep_id == user.sales_rep_id,
         models.Party.party_type == "customer",
     )
     if search:
@@ -798,9 +798,89 @@ def get_rep_customers(
                 models.Party.code.ilike(term),
                 models.Party.area.ilike(term),
                 models.Party.city.ilike(term),
+                models.Party.mobile.ilike(term),
             )
         )
     return q.order_by(models.Party.name).all()
+
+
+def get_rep_stock(
+    db: Session, user: models.User, search: Optional[str] = None, limit: int = 100
+):
+    """Distributor stock list for sales rep (honors display_stock_to_salesrep)."""
+    if user.role != "rep" or not user.account_id:
+        raise AppError("Sales rep login required")
+    distributor = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not distributor:
+        raise AppError("Distributor account not found")
+
+    settings = get_distributor_settings(distributor)
+    hide_hold = bool(distributor.hide_hold_products_from_salesrep)
+    limit = max(1, min(int(limit or 100), 300))
+
+    q = db.query(models.Product).filter(
+        models.Product.owner_account_id == distributor.id
+    )
+    if hide_hold:
+        q = q.filter(models.Product.is_on_hold.isnot(True))
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(term),
+                models.Product.product_code.ilike(term),
+                models.Product.manufacturer.ilike(term),
+            )
+        )
+    products = q.order_by(models.Product.name).limit(limit).all()
+    rows = []
+    for p in products:
+        _attach_stock(p)
+        batches = [b for b in p.stock_batches if b.show_to_customer]
+        if not batches and not distributor.allow_order_no_stock:
+            # still show product with zero if they want visibility — include zero stock products
+            pass
+        total = sum(b.available_qty for b in batches)
+        if not settings.display_stock_to_salesrep:
+            qty = None
+            stock_hidden = True
+        else:
+            qty = total
+            stock_hidden = False
+        scheme = ""
+        if not settings.hide_scheme_from_salesrep:
+            for b in batches:
+                if (b.scheme or "").strip():
+                    scheme = b.scheme
+                    break
+        rows.append(
+            {
+                "product": p,
+                "available_qty": qty,
+                "stock_hidden": stock_hidden,
+                "scheme": scheme,
+                "mrp": p.mrp,
+                "ptr_rate": p.ptr_rate,
+                "batch_count": len(batches),
+            }
+        )
+    return rows, settings
+
+
+def get_rep_outstanding(
+    db: Session, user: models.User, search: Optional[str] = None
+):
+    """Outstanding bills from distributor party master."""
+    if user.role != "rep" or not user.account_id:
+        raise AppError("Sales rep login required")
+    distributor = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not distributor:
+        raise AppError("Distributor account not found")
+    return get_outstanding(db, distributor, search=search, positive_only=True)
 
 
 def get_rep_catalog(
@@ -896,12 +976,12 @@ def create_rep_order(
         .filter(
             models.Party.id == data.party_id,
             models.Party.owner_account_id == distributor.id,
-            models.Party.sales_rep_id == user.sales_rep_id,
+            models.Party.party_type == "customer",
         )
         .first()
     )
     if not party:
-        raise AppError("Customer not found or not assigned to you")
+        raise AppError("Customer not found in your distributor party master")
 
     # Order is TO the distributor (Vajra), FROM the customer (Sri Dattha),
     # TAKEN BY the sales rep (Naresh). Buyer account = customer's GenSoft

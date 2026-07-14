@@ -39,6 +39,49 @@ def list_customers(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.get("/stock")
+def list_stock(
+    search: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=300),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_rep(user)
+    try:
+        rows, settings = crud.get_rep_stock(db, user, search=search, limit=limit)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    items = []
+    for row in rows:
+        product = schemas.Product.model_validate(row["product"]).model_dump()
+        items.append(
+            {
+                "product": product,
+                "available_qty": row["available_qty"],
+                "stock_hidden": row["stock_hidden"],
+                "scheme": row["scheme"] if not settings.hide_scheme_from_salesrep else "",
+                "mrp": row["mrp"],
+                "ptr_rate": row["ptr_rate"],
+                "batch_count": row["batch_count"],
+            }
+        )
+    return {"settings": settings, "items": items}
+
+
+@router.get("/outstanding", response_model=schemas.OutstandingListResponse)
+def list_outstanding(
+    search: Optional[str] = None,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_rep(user)
+    try:
+        summary, rows = crud.get_rep_outstanding(db, user, search=search)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return schemas.OutstandingListResponse(summary=summary, rows=rows)
+
+
 @router.get("/catalog")
 def search_catalog(
     q: Optional[str] = Query(None),

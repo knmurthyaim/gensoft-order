@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { repApi } from "../api";
 import { useAuth } from "../AuthContext.jsx";
-import { inr } from "../format";
+import { inr, fmtDate } from "../format";
 
 function aggregate(entry) {
   const batches = entry.batches || [];
@@ -33,17 +33,20 @@ export function RepCustomers() {
     repApi
       .customers(q ? { search: q } : undefined)
       .then(setRows)
-      .catch((e) => setError(e.response?.data?.detail || "Failed to load customers"));
+      .catch((e) => setError(e.response?.data?.detail || "Failed to load parties"));
   }, [q]);
 
   return (
     <div className="rep-page">
-      <h1 className="page-title">My Customers</h1>
-      <p className="page-sub">Only customers assigned to you by your distributor.</p>
+      <h1 className="page-title">Parties</h1>
+      <p className="page-sub">
+        All customers from your distributor party master. Place an order for any
+        party — it is recorded under your name.
+      </p>
       {error && <div className="error-banner">{error}</div>}
       <input
         className="search-input"
-        placeholder="Search customer..."
+        placeholder="Search party name, code, area..."
         value={q}
         onChange={(e) => setQ(e.target.value)}
         style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
@@ -53,6 +56,7 @@ export function RepCustomers() {
           <Link key={p.id} to={`/rep/order/${p.id}`} className="rep-customer-card">
             <strong>{p.name}</strong>
             <span className="muted">
+              {p.code ? `${p.code} · ` : ""}
               {[p.area, p.city].filter(Boolean).join(", ") || "—"}
               {p.mobile ? ` · ${p.mobile}` : ""}
             </span>
@@ -60,7 +64,7 @@ export function RepCustomers() {
           </Link>
         ))}
         {rows.length === 0 && (
-          <div className="empty">No customers assigned yet.</div>
+          <div className="empty">No parties in distributor master yet.</div>
         )}
       </div>
     </div>
@@ -87,10 +91,10 @@ export function RepOrder() {
       .customers()
       .then((list) => {
         const p = list.find((x) => String(x.id) === String(partyId));
-        if (!p) setError("Customer not found or not assigned to you.");
+        if (!p) setError("Party not found in distributor master.");
         else setParty(p);
       })
-      .catch(() => setError("Failed to load customer."));
+      .catch(() => setError("Failed to load party."));
   }, [partyId]);
 
   useEffect(() => {
@@ -363,6 +367,172 @@ export function RepOrders() {
   );
 }
 
+export function RepStock() {
+  const [items, setItems] = useState([]);
+  const [q, setQ] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      repApi
+        .stock(q ? { search: q, limit: 150 } : { limit: 150 })
+        .then((data) => setItems(data.items || []))
+        .catch((e) =>
+          setError(e.response?.data?.detail || "Failed to load stock")
+        );
+    }, 200);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  return (
+    <div className="rep-page">
+      <h1 className="page-title">Stock</h1>
+      <p className="page-sub">Your distributor stock (read only).</p>
+      {error && <div className="error-banner">{error}</div>}
+      <input
+        className="search-input"
+        placeholder="Search product..."
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
+      />
+      <div className="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Avail</th>
+              <th>Scheme</th>
+              <th>PTR</th>
+              <th>MRP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row) => (
+              <tr key={row.product.id}>
+                <td>
+                  <strong>{row.product.name}</strong>
+                  <div className="muted">
+                    {row.product.product_code
+                      ? `${row.product.product_code} · `
+                      : ""}
+                    {row.product.manufacturer} · {row.product.pack_size}
+                  </div>
+                </td>
+                <td>
+                  {row.stock_hidden
+                    ? "—"
+                    : row.available_qty == null
+                      ? "—"
+                      : row.available_qty}
+                </td>
+                <td>{row.scheme || "—"}</td>
+                <td>{inr(row.ptr_rate)}</td>
+                <td>{inr(row.mrp)}</td>
+              </tr>
+            ))}
+            {items.length === 0 && (
+              <tr>
+                <td colSpan={5} className="empty">
+                  No stock found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function RepOutstanding() {
+  const [summary, setSummary] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [q, setQ] = useState("");
+  const [error, setError] = useState("");
+
+  const load = (search = q) =>
+    repApi
+      .outstanding(search ? { search } : undefined)
+      .then((data) => {
+        setSummary(data.summary);
+        setRows(data.rows || []);
+      })
+      .catch((e) =>
+        setError(e.response?.data?.detail || "Failed to load outstanding")
+      );
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="rep-page">
+      <h1 className="page-title">Outstanding</h1>
+      <p className="page-sub">
+        Party outstanding from your distributor billing data.
+      </p>
+      {error && <div className="error-banner">{error}</div>}
+      {summary && (
+        <div className="orders-summary-bar" style={{ marginBottom: 12 }}>
+          <div className="summary-stats">
+            <span>Bills: {summary.bill_count}</span>
+            <span>Amount: {inr(summary.total_amount)}</span>
+            <span className="summary-total">
+              Balance: {inr(summary.total_balance)}
+            </span>
+          </div>
+        </div>
+      )}
+      <input
+        className="search-input"
+        placeholder="Search party / invoice..."
+        value={q}
+        onChange={(e) => {
+          setQ(e.target.value);
+          load(e.target.value);
+        }}
+        style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
+      />
+      <div className="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Party</th>
+              <th>Invoice</th>
+              <th>Date</th>
+              <th>Balance</th>
+              <th>Age</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td>
+                  <strong>{r.party_name}</strong>
+                  <div className="muted">{r.party_id || ""}</div>
+                </td>
+                <td>{r.invoice_no}</td>
+                <td>{fmtDate(r.invoice_date)}</td>
+                <td className="order-amount">{inr(r.balance)}</td>
+                <td>{r.age}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="empty">
+                  No outstanding bills.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function RepShell({ children }) {
   const { user, account, salesRep, logout } = useAuth();
   return (
@@ -379,8 +549,10 @@ export function RepShell({ children }) {
         </button>
       </header>
       <nav className="rep-tabs">
-        <Link to="/rep">Customers</Link>
-        <Link to="/rep/orders">Orders</Link>
+        <Link to="/rep">Parties</Link>
+        <Link to="/rep/stock">Stock</Link>
+        <Link to="/rep/outstanding">Outstanding</Link>
+        <Link to="/rep/orders">My Orders</Link>
       </nav>
       <main className="rep-main">{children}</main>
     </div>
