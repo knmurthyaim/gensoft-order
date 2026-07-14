@@ -588,6 +588,73 @@ def get_supplier_catalog(
     return result
 
 
+def search_products_across_suppliers(
+    db: Session,
+    account: models.Account,
+    search: Optional[str] = None,
+    limit: int = 40,
+    in_stock_only: bool = False,
+    first_word_exact: bool = False,
+    scheme_only: bool = False,
+):
+    """Search a product across all accepted connected suppliers."""
+    term = (search or "").strip()
+    if not term:
+        return []
+
+    supplier_ids = _accepted_supplier_ids(db, account)
+    if not supplier_ids:
+        return []
+
+    limit = max(1, min(int(limit or 40), 100))
+    # Fetch a few matches per supplier so one large supplier can't fill the list alone
+    per_supplier = max(3, min(15, limit))
+
+    suppliers = (
+        db.query(models.Account)
+        .filter(models.Account.id.in_(supplier_ids))
+        .all()
+    )
+    supplier_map = {s.id: s for s in suppliers}
+
+    results = []
+    for sid in supplier_ids:
+        supplier = supplier_map.get(sid)
+        if not supplier:
+            continue
+        try:
+            entries = get_supplier_catalog(
+                db,
+                account,
+                sid,
+                search=term,
+                limit=per_supplier,
+                in_stock_only=in_stock_only,
+                first_word_exact=first_word_exact,
+                scheme_only=scheme_only,
+            )
+        except AppError:
+            continue
+        for entry in entries:
+            results.append({
+                "product": entry["product"],
+                "batches": entry["batches"],
+                "settings": entry["settings"],
+                "supplier": supplier,
+            })
+            if len(results) >= limit:
+                return results
+    # Prefer products whose name starts with the search term
+    results.sort(
+        key=lambda e: (
+            0 if (e["product"].name or "").lower().startswith(term.lower()) else 1,
+            (e["product"].name or "").lower(),
+            (e["supplier"].name or "").lower(),
+        )
+    )
+    return results[:limit]
+
+
 # ---------- Orders ----------
 VALID_STATUSES = {
     "received", "viewed", "transferred", "billed",

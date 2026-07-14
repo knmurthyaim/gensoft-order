@@ -19,7 +19,6 @@ function stockTone(avail, hidden) {
   return "ok";
 }
 
-/** Highlight query matches like Zennx search results */
 function highlightMatch(text, q) {
   const value = text || "";
   const term = (q || "").trim();
@@ -36,11 +35,58 @@ function highlightMatch(text, q) {
   );
 }
 
+/** One row per product: sum stock, latest MRP/PTR */
+function aggregateEntry(entry, supplier, settings) {
+  const batches = entry.batches || [];
+  const stockHidden = batches.some((b) => b.stock_hidden);
+  const sumQty = stockHidden
+    ? null
+    : batches.reduce((s, b) => s + (Number(b.available_qty) || 0), 0);
+
+  let latest = null;
+  for (const b of batches) {
+    if (!latest) {
+      latest = b;
+      continue;
+    }
+    const a = b.expiry_date || "";
+    const c = latest.expiry_date || "";
+    if (a && c) {
+      if (a > c) latest = b;
+      else if (a === c && (b.id || 0) > (latest.id || 0)) latest = b;
+    } else if (!c && a) {
+      latest = b;
+    } else if (!a && !c && (b.id || 0) > (latest.id || 0)) {
+      latest = b;
+    }
+  }
+
+  const scheme = latest?.scheme_hidden
+    ? ""
+    : (latest?.scheme || "").trim() ||
+      batches.map((b) => b.scheme).find((s) => (s || "").trim()) ||
+      "";
+
+  return {
+    entry,
+    supplier,
+    settings: settings || defaultSettings,
+    aggregate: {
+      available_qty: sumQty,
+      stock_hidden: stockHidden,
+      mrp: latest?.mrp ?? entry.product.mrp,
+      ptr_rate: latest?.ptr_rate ?? entry.product.ptr_rate,
+      scheme,
+      batch_count: batches.length,
+    },
+  };
+}
+
 export default function Marketplace() {
   const navigate = useNavigate();
+  const [orderMode, setOrderMode] = useState("product"); // product | distributor
   const [suppliers, setSuppliers] = useState([]);
   const [supplierId, setSupplierId] = useState("");
-  const [supplierSettings, setSupplierSettings] = useState(defaultSettings);
   const [catalogNotice, setCatalogNotice] = useState("");
 
   const [query, setQuery] = useState("");
@@ -53,7 +99,7 @@ export default function Marketplace() {
 
   const [firstWordExact, setFirstWordExact] = useState(false);
   const [schemeOnly, setSchemeOnly] = useState(false);
-  const [stockMode, setStockMode] = useState("all"); // all | in_stock
+  const [stockMode, setStockMode] = useState("all");
 
   const [cart, setCart] = useState({});
   const [error, setError] = useState("");
@@ -76,24 +122,32 @@ export default function Marketplace() {
     return () => clearTimeout(t);
   }, [query]);
 
-  const selectSupplier = (id) => {
-    setSupplierId(id);
-    setCart({});
-    setNotice("");
+  const switchMode = (mode) => {
+    setOrderMode(mode);
     setQuery("");
     setDebouncedQ("");
     setResults([]);
     setSelected(null);
     setError("");
-    if (!id) {
-      setSupplierSettings(defaultSettings);
-      setCatalogNotice("");
-      return;
+    setCatalogNotice("");
+    if (mode === "product") {
+      setSupplierId("");
+      setTimeout(() => searchRef.current?.focus(), 50);
     }
+  };
+
+  const selectSupplier = (id) => {
+    setSupplierId(id);
+    setQuery("");
+    setDebouncedQ("");
+    setResults([]);
+    setSelected(null);
+    setError("");
+    setCatalogNotice("");
+    if (!id) return;
     marketplace
       .catalog(id, { q: "", limit: 1 })
       .then((data) => {
-        setSupplierSettings(data.settings || defaultSettings);
         setCatalogNotice(data.notice || "");
         setTimeout(() => searchRef.current?.focus(), 50);
       })
@@ -103,71 +157,51 @@ export default function Marketplace() {
   };
 
   useEffect(() => {
-    if (!supplierId || debouncedQ.length < 1) {
+    if (debouncedQ.length < 1) {
       setResults([]);
       setSearching(false);
       return;
     }
+    if (orderMode === "distributor" && !supplierId) {
+      setResults([]);
+      return;
+    }
+
     let cancelled = false;
     setSearching(true);
-    marketplace
-      .catalog(supplierId, {
-        q: debouncedQ,
-        limit: 40,
-        in_stock_only: stockMode === "in_stock",
-        first_word_exact: firstWordExact,
-        scheme_only: schemeOnly,
-      })
+    const params = {
+      q: debouncedQ,
+      limit: 40,
+      in_stock_only: stockMode === "in_stock",
+      first_word_exact: firstWordExact,
+      scheme_only: schemeOnly,
+    };
+
+    const req =
+      orderMode === "product"
+        ? marketplace.searchProducts(params)
+        : marketplace.catalog(supplierId, params);
+
+    req
       .then((data) => {
         if (cancelled) return;
-        setSupplierSettings(data.settings || defaultSettings);
-        // One row per product: sum stock qty, use latest batch MRP/PTR
-        const rows = (data.items || []).map((entry) => {
-          const batches = entry.batches || [];
-          const stockHidden = batches.some((b) => b.stock_hidden);
-          const sumQty = stockHidden
-            ? null
-            : batches.reduce((s, b) => s + (Number(b.available_qty) || 0), 0);
-
-          let latest = null;
-          for (const b of batches) {
-            if (!latest) {
-              latest = b;
-              continue;
-            }
-            const a = b.expiry_date || "";
-            const c = latest.expiry_date || "";
-            // Prefer furthest expiry (newest usable stock); if tie/missing, higher id
-            if (a && c) {
-              if (a > c) latest = b;
-              else if (a === c && (b.id || 0) > (latest.id || 0)) latest = b;
-            } else if (!c && a) {
-              latest = b;
-            } else if (!a && !c && (b.id || 0) > (latest.id || 0)) {
-              latest = b;
-            }
-          }
-
-          const scheme = latest?.scheme_hidden
-            ? ""
-            : (latest?.scheme || "").trim() ||
-              batches.map((b) => b.scheme).find((s) => (s || "").trim()) ||
-              "";
-
-          return {
-            entry,
-            batch: null, // order by product; no batch split in UI
-            aggregate: {
-              available_qty: sumQty,
-              stock_hidden: stockHidden,
-              mrp: latest?.mrp ?? entry.product.mrp,
-              ptr_rate: latest?.ptr_rate ?? entry.product.ptr_rate,
-              scheme,
-              batch_count: batches.length,
-            },
-          };
-        });
-        setResults(rows);
+        if (orderMode === "product") {
+          const rows = (data.items || []).map((item) =>
+            aggregateEntry(item, item.supplier, item.settings)
+          );
+          setResults(rows);
+        } else {
+          const supplier =
+            suppliers.find((s) => String(s.id) === String(supplierId)) || {
+              id: parseInt(supplierId, 10),
+              name: "Supplier",
+            };
+          const rows = (data.items || []).map((entry) =>
+            aggregateEntry(entry, supplier, data.settings)
+          );
+          setResults(rows);
+          if (data.notice) setCatalogNotice(data.notice);
+        }
         setHighlight(0);
       })
       .catch((err) => {
@@ -177,12 +211,22 @@ export default function Marketplace() {
       .finally(() => {
         if (!cancelled) setSearching(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [supplierId, debouncedQ, stockMode, firstWordExact, schemeOnly]);
+  }, [
+    orderMode,
+    supplierId,
+    debouncedQ,
+    stockMode,
+    firstWordExact,
+    schemeOnly,
+    suppliers,
+  ]);
 
-  const cartKey = (entry) => `p-${entry.product.id}`;
+  const cartKey = (supplierIdVal, productId) =>
+    `s-${supplierIdVal}-p-${productId}`;
 
   const addToCart = (row, qtyRaw) => {
     if (!row) {
@@ -196,30 +240,41 @@ export default function Marketplace() {
       qtyRef.current?.focus();
       return;
     }
-    const { entry, aggregate } = row;
-    const avail = aggregate?.stock_hidden
+    const sid = row.supplier?.id;
+    if (!sid) {
+      setError("Supplier missing for this product.");
+      return;
+    }
+    const settings = row.settings || defaultSettings;
+    const avail = row.aggregate?.stock_hidden
       ? null
-      : aggregate?.available_qty ?? entry.product.total_stock;
+      : row.aggregate?.available_qty ?? row.entry.product.total_stock;
     if (
       avail !== null &&
       avail !== undefined &&
-      !supplierSettings.allow_order_over_stock &&
+      !settings.allow_order_over_stock &&
       n > avail &&
       avail > 0
     ) {
-      setError(`Only ${avail} available for ${entry.product.name}.`);
+      setError(`Only ${avail} available for ${row.entry.product.name}.`);
       return;
     }
-    if (avail === 0 && !supplierSettings.allow_order_no_stock) {
+    if (avail === 0 && !settings.allow_order_no_stock) {
       setError("This product has no stock.");
       return;
     }
-    const key = cartKey(entry);
+    const key = cartKey(sid, row.entry.product.id);
     setCart((c) => {
       const prev = c[key]?.qty || 0;
       return {
         ...c,
-        [key]: { qty: prev + n, entry, batch: null, aggregate },
+        [key]: {
+          qty: prev + n,
+          entry: row.entry,
+          supplier: row.supplier,
+          settings,
+          aggregate: row.aggregate,
+        },
       };
     });
     setError("");
@@ -255,10 +310,7 @@ export default function Marketplace() {
   const total = useMemo(
     () =>
       cartLines.reduce((sum, l) => {
-        const rate =
-          l.aggregate?.ptr_rate ||
-          l.batch?.ptr_rate ||
-          l.entry.product.ptr_rate;
+        const rate = l.aggregate?.ptr_rate || l.entry.product.ptr_rate;
         const taxable = rate * l.qty;
         return sum + taxable + (taxable * l.entry.product.gst_pct) / 100;
       }, 0),
@@ -266,23 +318,36 @@ export default function Marketplace() {
   );
 
   const placeOrder = async () => {
-    if (!supplierId || cartLines.length === 0) return;
+    if (cartLines.length === 0) return;
     setPlacing(true);
     setError("");
     try {
-      await ordersApi.create({
-        supplier_account_id: parseInt(supplierId, 10),
-        source: "web",
-        items: cartLines.map((l) => ({
-          product_id: l.entry.product.id,
-          batch_id: null,
-          qty: l.qty,
-          rate: l.aggregate?.ptr_rate ?? undefined,
-        })),
-      });
-      setNotice("Order placed successfully.");
+      const bySupplier = {};
+      for (const l of cartLines) {
+        const sid = l.supplier.id;
+        if (!bySupplier[sid]) bySupplier[sid] = [];
+        bySupplier[sid].push(l);
+      }
+      const supplierCount = Object.keys(bySupplier).length;
+      for (const [sid, lines] of Object.entries(bySupplier)) {
+        await ordersApi.create({
+          supplier_account_id: parseInt(sid, 10),
+          source: "web",
+          items: lines.map((l) => ({
+            product_id: l.entry.product.id,
+            batch_id: null,
+            qty: l.qty,
+            rate: l.aggregate?.ptr_rate ?? undefined,
+          })),
+        });
+      }
+      setNotice(
+        supplierCount > 1
+          ? `${supplierCount} orders placed (one per distributor).`
+          : "Order placed successfully."
+      );
       setCart({});
-      setTimeout(() => navigate("/my-orders"), 800);
+      setTimeout(() => navigate("/my-orders"), 900);
     } catch (err) {
       setError(err.response?.data?.detail || "Could not place order.");
     } finally {
@@ -312,14 +377,16 @@ export default function Marketplace() {
     }
   };
 
+  const canSearch =
+    orderMode === "product" || (orderMode === "distributor" && !!supplierId);
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Place Order</h1>
           <p className="page-sub">
-            Select a supplier, then search &amp; add products (no full list
-            load).
+            Search by product across distributors, or pick a distributor first.
           </p>
         </div>
       </div>
@@ -334,8 +401,8 @@ export default function Marketplace() {
         <div className="empty-cta">
           <h3>No connected suppliers yet</h3>
           <p>
-            To place an order, you first need an accepted connection with a
-            supplier. Request one from the GenSoft directory, then return here.
+            Connect to a distributor from Connections, then return here to
+            search their products.
           </p>
           <button className="btn" onClick={() => navigate("/connections")}>
             Go to Connections
@@ -344,238 +411,290 @@ export default function Marketplace() {
       )}
 
       {suppliers.length > 0 && (
-        <div className="order-step-fields">
-          <label className="order-field">
-            <span>
-              Supplier <em className="req">*</em>
-            </span>
-            <select
-              value={supplierId}
-              onChange={(e) => selectSupplier(e.target.value)}
-              required
-            >
-              <option value="">Select supplier...</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.gensoft_code})
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
-
-      {!supplierId && suppliers.length > 0 && (
-        <p className="muted order-hint">
-          Select a supplier first, then search and select a product.
-        </p>
-      )}
-
-      {supplierId && (
-        <div className="order-search-panel">
-          <div className="stock-legend">
-            <span>
-              <i className="dot ok" /> In stock
-            </span>
-            <span>
-              <i className="dot low" /> Low stock
-            </span>
-            <span>
-              <i className="dot none" /> No stock
-            </span>
-          </div>
-
-          <label className="order-field product-field">
-            <span>
-              Product <em className="req">*</em>
-            </span>
-          </label>
-
-          <div className="order-search-row">
-            <div className="order-search-main">
-              <input
-                ref={searchRef}
-                type="search"
-                className={`order-search-input${selected ? " selected" : ""}`}
-                placeholder="Search & Add Products"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setSelected(null);
-                }}
-                onKeyDown={onSearchKeyDown}
-                autoComplete="off"
-                required
-              />
-              {selected && (
-                <div className="selected-product-chip">
-                  Selected: <strong>{selected.entry.product.name}</strong>
-                  {selected.aggregate?.available_qty != null
-                    ? ` · Avl ${selected.aggregate.available_qty}`
-                    : ""}
-                </div>
-              )}
-              {searching && <span className="search-hint">Searching…</span>}
-              {!searching && results.length > 0 && (
-                <ul className="order-suggest">
-                  <li className="suggest-head" aria-hidden="true">
-                    <span className="suggest-col-name">Product</span>
-                    <span className="suggest-col-scheme">Scheme</span>
-                    <span className="suggest-col-stock">Stock</span>
-                    <span className="suggest-col-price">MRP</span>
-                    <span className="suggest-col-price">PTR</span>
-                  </li>
-                  {results.map((row, idx) => {
-                    const avail = row.aggregate?.stock_hidden
-                      ? null
-                      : row.aggregate?.available_qty ??
-                        row.entry.product.total_stock;
-                    const tone = stockTone(
-                      avail,
-                      row.aggregate?.stock_hidden
-                    );
-                    const scheme = row.aggregate?.scheme || "";
-                    const mrp =
-                      row.aggregate?.mrp ?? row.entry.product.mrp;
-                    const ptr =
-                      row.aggregate?.ptr_rate ?? row.entry.product.ptr_rate;
-                    return (
-                      <li
-                        key={cartKey(row.entry)}
-                        className={idx === highlight ? "active" : ""}
-                        onMouseEnter={() => setHighlight(idx)}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setSelected(row);
-                          setQuery(row.entry.product.name);
-                          setResults([]);
-                          setError("");
-                          qtyRef.current?.focus();
-                        }}
-                      >
-                        <div className="suggest-col-name">
-                          <strong>
-                            {highlightMatch(row.entry.product.name, debouncedQ)}
-                          </strong>
-                          <span className="muted">
-                            {row.entry.product.manufacturer}
-                            {row.entry.product.pack_size
-                              ? ` · ${row.entry.product.pack_size}`
-                              : ""}
-                            {row.aggregate?.batch_count > 1
-                              ? ` · ${row.aggregate.batch_count} batches`
-                              : ""}
-                          </span>
-                        </div>
-                        <span className="suggest-col-scheme">
-                          {scheme || "—"}
-                        </span>
-                        <span className={`suggest-col-stock stock-${tone}`}>
-                          {avail === null || avail === undefined
-                            ? "—"
-                            : avail > 0
-                              ? `Avl ${avail}`
-                              : "0 Stock"}
-                        </span>
-                        <span className="suggest-col-price">{inr(mrp)}</span>
-                        <span className="suggest-col-price">{inr(ptr)}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {!searching &&
-                debouncedQ &&
-                results.length === 0 &&
-                !selected && (
-                  <div className="order-suggest empty-suggest">
-                    No products match “{debouncedQ}”
-                  </div>
-                )}
-            </div>
-
-            <div className="order-qty-wrap">
-              <span className="qty-label">Qty</span>
-              <input
-                ref={qtyRef}
-                type="number"
-                min="1"
-                className="order-qty-input"
-                value={addQty}
-                onChange={(e) => setAddQty(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (!selected) {
-                      setError(
-                        "Product selection is required. Choose a product from the list."
-                      );
-                      searchRef.current?.focus();
-                      return;
-                    }
-                    addToCart(selected, addQty);
-                  }
-                }}
-                title="Quantity"
-              />
-            </div>
+        <>
+          <div className="order-mode-tabs">
             <button
               type="button"
-              className="btn order-add-btn"
-              disabled={!selected}
-              onClick={() => {
-                if (!selected) {
-                  setError(
-                    "Product selection is required. Search and choose a product first."
-                  );
-                  searchRef.current?.focus();
-                  return;
-                }
-                addToCart(selected, addQty);
-              }}
+              className={orderMode === "product" ? "active" : ""}
+              onClick={() => switchMode("product")}
             >
-              +
+              By Product
+            </button>
+            <button
+              type="button"
+              className={orderMode === "distributor" ? "active" : ""}
+              onClick={() => switchMode("distributor")}
+            >
+              By Distributor
             </button>
           </div>
 
-          <div className="order-search-filters">
-            <div className="filter-title">Product Search Options</div>
-            <label>
-              <input
-                type="checkbox"
-                checked={firstWordExact}
-                onChange={(e) => setFirstWordExact(e.target.checked)}
-              />{" "}
-              First Word Exact Match
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={schemeOnly}
-                onChange={(e) => setSchemeOnly(e.target.checked)}
-              />{" "}
-              Scheme Items Only
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="stockMode"
-                checked={stockMode === "in_stock"}
-                onChange={() => setStockMode("in_stock")}
-              />{" "}
-              In Stock Only
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="stockMode"
-                checked={stockMode === "all"}
-                onChange={() => setStockMode("all")}
-              />{" "}
-              In Stock &amp; Nil Stock
-            </label>
-          </div>
-        </div>
+          {orderMode === "distributor" && (
+            <div className="order-step-fields">
+              <label className="order-field">
+                <span>
+                  Supplier <em className="req">*</em>
+                </span>
+                <select
+                  value={supplierId}
+                  onChange={(e) => selectSupplier(e.target.value)}
+                  required
+                >
+                  <option value="">Select supplier...</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.gensoft_code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
+          {orderMode === "distributor" && !supplierId && (
+            <p className="muted order-hint">
+              Select a supplier, then search products from that distributor only.
+            </p>
+          )}
+
+          {canSearch && (
+            <div className="order-search-panel">
+              <div className="stock-legend">
+                <span>
+                  <i className="dot ok" /> In stock
+                </span>
+                <span>
+                  <i className="dot low" /> Low stock
+                </span>
+                <span>
+                  <i className="dot none" /> No stock
+                </span>
+              </div>
+
+              <label className="order-field product-field">
+                <span>
+                  Product <em className="req">*</em>
+                  {orderMode === "product" && (
+                    <span className="muted" style={{ fontWeight: 400 }}>
+                      {" "}
+                      — shows which distributor has it
+                    </span>
+                  )}
+                </span>
+              </label>
+
+              <div className="order-search-row">
+                <div className="order-search-main">
+                  <input
+                    ref={searchRef}
+                    type="search"
+                    className={`order-search-input${selected ? " selected" : ""}`}
+                    placeholder={
+                      orderMode === "product"
+                        ? "Search product across distributors..."
+                        : "Search & Add Products"
+                    }
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setSelected(null);
+                    }}
+                    onKeyDown={onSearchKeyDown}
+                    autoComplete="off"
+                  />
+                  {selected && (
+                    <div className="selected-product-chip">
+                      Selected: <strong>{selected.entry.product.name}</strong>
+                      {selected.supplier?.name
+                        ? ` · ${selected.supplier.name}`
+                        : ""}
+                      {selected.aggregate?.available_qty != null
+                        ? ` · Avl ${selected.aggregate.available_qty}`
+                        : ""}
+                    </div>
+                  )}
+                  {searching && (
+                    <span className="search-hint">Searching…</span>
+                  )}
+                  {!searching && results.length > 0 && (
+                    <ul className="order-suggest">
+                      <li
+                        className={
+                          "suggest-head" +
+                          (orderMode === "product" ? " suggest-row-product" : "")
+                        }
+                        aria-hidden="true"
+                      >
+                        <span className="suggest-col-name">Product</span>
+                        {orderMode === "product" && (
+                          <span className="suggest-col-supplier">
+                            Distributor
+                          </span>
+                        )}
+                        <span className="suggest-col-scheme">Scheme</span>
+                        <span className="suggest-col-stock">Stock</span>
+                        <span className="suggest-col-price">MRP</span>
+                        <span className="suggest-col-price">PTR</span>
+                      </li>
+                      {results.map((row, idx) => {
+                        const avail = row.aggregate?.stock_hidden
+                          ? null
+                          : row.aggregate?.available_qty ??
+                            row.entry.product.total_stock;
+                        const tone = stockTone(
+                          avail,
+                          row.aggregate?.stock_hidden
+                        );
+                        return (
+                          <li
+                            key={`${row.supplier?.id}-${row.entry.product.id}`}
+                            className={
+                              (orderMode === "product"
+                                ? "suggest-row-product "
+                                : "") + (idx === highlight ? "active" : "")
+                            }
+                            onMouseEnter={() => setHighlight(idx)}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setSelected(row);
+                              setQuery(row.entry.product.name);
+                              setResults([]);
+                              setError("");
+                              qtyRef.current?.focus();
+                            }}
+                          >
+                            <div className="suggest-col-name">
+                              <strong>
+                                {highlightMatch(
+                                  row.entry.product.name,
+                                  debouncedQ
+                                )}
+                              </strong>
+                              <span className="muted">
+                                {row.entry.product.manufacturer}
+                                {row.entry.product.pack_size
+                                  ? ` · ${row.entry.product.pack_size}`
+                                  : ""}
+                              </span>
+                            </div>
+                            {orderMode === "product" && (
+                              <span className="suggest-col-supplier">
+                                {row.supplier?.name || "—"}
+                              </span>
+                            )}
+                            <span className="suggest-col-scheme">
+                              {row.aggregate?.scheme || "—"}
+                            </span>
+                            <span
+                              className={`suggest-col-stock stock-${tone}`}
+                            >
+                              {avail === null || avail === undefined
+                                ? "—"
+                                : avail > 0
+                                  ? `Avl ${avail}`
+                                  : "0 Stock"}
+                            </span>
+                            <span className="suggest-col-price">
+                              {inr(
+                                row.aggregate?.mrp ?? row.entry.product.mrp
+                              )}
+                            </span>
+                            <span className="suggest-col-price">
+                              {inr(
+                                row.aggregate?.ptr_rate ??
+                                  row.entry.product.ptr_rate
+                              )}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {!searching &&
+                    debouncedQ &&
+                    results.length === 0 &&
+                    !selected && (
+                      <div className="order-suggest empty-suggest">
+                        No products match “{debouncedQ}”
+                        {orderMode === "product"
+                          ? " at your connected distributors"
+                          : ""}
+                      </div>
+                    )}
+                </div>
+
+                <div className="order-qty-wrap">
+                  <span className="qty-label">Qty</span>
+                  <input
+                    ref={qtyRef}
+                    type="number"
+                    min="1"
+                    className="order-qty-input"
+                    value={addQty}
+                    onChange={(e) => setAddQty(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (!selected) {
+                          setError("Choose a product from the list first.");
+                          searchRef.current?.focus();
+                          return;
+                        }
+                        addToCart(selected, addQty);
+                      }
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn order-add-btn"
+                  disabled={!selected}
+                  onClick={() => addToCart(selected, addQty)}
+                >
+                  +
+                </button>
+              </div>
+
+              <div className="order-search-filters">
+                <div className="filter-title">Product Search Options</div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={firstWordExact}
+                    onChange={(e) => setFirstWordExact(e.target.checked)}
+                  />{" "}
+                  First Word Exact Match
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={schemeOnly}
+                    onChange={(e) => setSchemeOnly(e.target.checked)}
+                  />{" "}
+                  Scheme Items Only
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="stockMode"
+                    checked={stockMode === "in_stock"}
+                    onChange={() => setStockMode("in_stock")}
+                  />{" "}
+                  In Stock Only
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="stockMode"
+                    checked={stockMode === "all"}
+                    onChange={() => setStockMode("all")}
+                  />{" "}
+                  In Stock &amp; Nil Stock
+                </label>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {cartLines.length > 0 && (
@@ -584,6 +703,7 @@ export default function Marketplace() {
             <thead>
               <tr>
                 <th>Product</th>
+                <th>Distributor</th>
                 <th>Avail</th>
                 <th>Scheme</th>
                 <th>MRP</th>
@@ -611,18 +731,19 @@ export default function Marketplace() {
                         {l.entry.product.pack_size}
                       </div>
                     </td>
-                    <td className={tone === "low" || tone === "none" ? "low-stock" : ""}>
+                    <td>{l.supplier?.name || "—"}</td>
+                    <td
+                      className={
+                        tone === "low" || tone === "none" ? "low-stock" : ""
+                      }
+                    >
                       <i className={`dot ${tone}`} />{" "}
                       {avail === null || avail === undefined ? "—" : avail}
                     </td>
                     <td>{l.aggregate?.scheme || "—"}</td>
+                    <td>{inr(l.aggregate?.mrp ?? l.entry.product.mrp)}</td>
                     <td>
-                      {inr(l.aggregate?.mrp ?? l.entry.product.mrp)}
-                    </td>
-                    <td>
-                      {inr(
-                        l.aggregate?.ptr_rate ?? l.entry.product.ptr_rate
-                      )}
+                      {inr(l.aggregate?.ptr_rate ?? l.entry.product.ptr_rate)}
                     </td>
                     <td>
                       <input
@@ -650,10 +771,11 @@ export default function Marketplace() {
         </div>
       )}
 
-      {supplierId && cartLines.length === 0 && (
+      {suppliers.length > 0 && canSearch && cartLines.length === 0 && (
         <p className="muted" style={{ marginTop: 20, textAlign: "center" }}>
-          Product selection is required — search, choose a product from the
-          list, enter qty, then press +.
+          {orderMode === "product"
+            ? "Type a product name to see which distributors have it."
+            : "Search, choose a product, enter qty, then press +."}
         </p>
       )}
 

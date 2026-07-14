@@ -1474,6 +1474,34 @@ textarea {
 }
 
 /* Place Order — search & add */
+.order-mode-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.order-mode-tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.order-mode-tabs button.active {
+  color: #1a73e8;
+  border-bottom-color: #1a73e8;
+}
+
+.order-mode-tabs button:hover {
+  color: #1a73e8;
+}
+
 .order-step-fields {
   margin-bottom: 12px;
 }
@@ -1648,6 +1676,20 @@ textarea {
   padding: 10px 12px;
   cursor: pointer;
   border-bottom: 1px solid #f0f0f0;
+}
+
+.order-suggest li.suggest-row-product {
+  grid-template-columns: minmax(0, 1.2fr) minmax(100px, 0.9fr) 70px 80px 70px 70px;
+}
+
+.suggest-col-supplier {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a73e8;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .order-suggest li.suggest-head {

@@ -68,3 +68,56 @@ def supplier_catalog(
         "notice": crud._no_order_notice(supplier),
         "query": term,
     }
+
+
+@router.get("/products/search")
+def search_products_across_suppliers(
+    q: Optional[str] = Query(None, description="Product search text"),
+    search: Optional[str] = Query(None, description="Alias for q"),
+    limit: int = Query(40, ge=1, le=100),
+    in_stock_only: bool = Query(False),
+    first_word_exact: bool = Query(False),
+    scheme_only: bool = Query(False),
+    account: models.Account = Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    """Find which connected distributors have a product (By Product search)."""
+    term = (q or search or "").strip()
+    try:
+        rows = crud.search_products_across_suppliers(
+            db,
+            account,
+            search=term,
+            limit=limit,
+            in_stock_only=in_stock_only,
+            first_word_exact=first_word_exact,
+            scheme_only=scheme_only,
+        )
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    items = []
+    for entry in rows:
+        supplier = entry["supplier"]
+        settings = entry["settings"]
+        product = schemas.Product.model_validate(entry["product"]).model_dump()
+        batches = [
+            _mask_for_party(schemas.StockBatch.model_validate(b).model_dump(), settings)
+            for b in entry["batches"]
+        ]
+        items.append(
+            {
+                "product": product,
+                "batches": batches,
+                "settings": settings,
+                "supplier": {
+                    "id": supplier.id,
+                    "name": supplier.name,
+                    "gensoft_code": supplier.gensoft_code,
+                    "city": supplier.city or "",
+                    "area": supplier.area or "",
+                },
+                "notice": crud._no_order_notice(supplier),
+            }
+        )
+    return {"items": items, "query": term}
