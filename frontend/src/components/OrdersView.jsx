@@ -198,7 +198,7 @@ export default function OrdersView({ direction, title, subtitle }) {
           <thead>
             <tr>
               <th>#</th>
-              <th>{isReceived ? "Buyer" : "Supplier"}</th>
+              <th>{isReceived ? "Customer / From" : "Supplier"}</th>
               <th>Items</th>
               <th>Total</th>
               <th>Status</th>
@@ -208,15 +208,31 @@ export default function OrdersView({ direction, title, subtitle }) {
           <tbody>
             {orders.map((o) => {
               const counterparty = isReceived ? o.buyer : o.supplier;
+              const customerName =
+                o.party?.name || counterparty?.name || "—";
+              const isRepOrder = Boolean(o.sales_rep_id) || o.source === "app";
               return (
                 <tr key={o.id}>
                   <td>
                     {o.order_no}
                     <div className="muted">{fmtDateTime(o.created_at)}</div>
+                    {isRepOrder && (
+                      <div className="rep-order-tag">Sales Rep Order</div>
+                    )}
                   </td>
                   <td>
-                    <strong>{counterparty?.name || "—"}</strong>
-                    <div className="muted">{counterparty?.gensoft_code}</div>
+                    <strong>{customerName}</strong>
+                    {isReceived && o.sales_rep?.name && (
+                      <div className="muted">
+                        via Rep: {o.sales_rep.name}
+                      </div>
+                    )}
+                    {isReceived && !o.sales_rep?.name && counterparty?.gensoft_code && (
+                      <div className="muted">{counterparty.gensoft_code}</div>
+                    )}
+                    {!isReceived && (
+                      <div className="muted">{counterparty?.gensoft_code}</div>
+                    )}
                   </td>
                   <td>{o.item_count}</td>
                   <td className="order-amount">{inr(o.total_amount)}</td>
@@ -293,12 +309,25 @@ export default function OrdersView({ direction, title, subtitle }) {
         <Modal title={`Order ${detail.order_no}`} onClose={closeDetail} wide>
           <div className="detail-grid">
             <div>
-              <div className="muted">Buyer</div>
-              <strong>{detail.buyer?.name}</strong>
+              <div className="muted">Customer</div>
+              <strong>{detail.party?.name || detail.buyer?.name || "—"}</strong>
+              {detail.buyer?.name && detail.party?.name && (
+                <div className="muted">Account: {detail.buyer.name}</div>
+              )}
             </div>
             <div>
-              <div className="muted">Supplier</div>
+              <div className="muted">Distributor</div>
               <strong>{detail.supplier?.name}</strong>
+            </div>
+            <div>
+              <div className="muted">Sales Rep</div>
+              <strong>
+                {detail.sales_rep?.name ||
+                  (detail.source === "app" ? "Sales rep app" : "—")}
+              </strong>
+              {detail.source === "app" && (
+                <div className="muted">Source: Sales Rep App</div>
+              )}
             </div>
             <div>
               <div className="muted">Status</div>
@@ -309,6 +338,13 @@ export default function OrdersView({ direction, title, subtitle }) {
               {fmtDateTime(detail.created_at)}
             </div>
           </div>
+
+          {detail.notes && (
+            <div className="remarks-box" style={{ marginTop: 12 }}>
+              <div className="muted">Notes</div>
+              <div>{detail.notes}</div>
+            </div>
+          )}
 
           {detail.remarks && (
             <div className="remarks-box">

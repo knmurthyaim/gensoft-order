@@ -886,6 +886,11 @@ def create_rep_order(
     if not distributor:
         raise AppError("Distributor account not found")
 
+    rep = (
+        db.query(models.SalesRep)
+        .filter(models.SalesRep.id == user.sales_rep_id)
+        .first()
+    )
     party = (
         db.query(models.Party)
         .filter(
@@ -898,16 +903,20 @@ def create_rep_order(
     if not party:
         raise AppError("Customer not found or not assigned to you")
 
-    # Place order as the linked retailer when available; otherwise attribute to party
+    # Buyer = linked GenSoft account when available; else distributor holds
+    # the order with party_id so Orders Received still lists it to the firm.
     buyer_id = party.linked_account_id or distributor.id
+    note = (data.notes or "").strip()
+    auto = f"Order from sales rep {rep.name if rep else user.name} for customer {party.name}"
+    notes = f"{auto}. {note}" if note else auto
+
     order_data = schemas.OrderCreate(
         supplier_account_id=distributor.id,
         sales_rep_id=user.sales_rep_id,
         source="app",
-        notes=data.notes or "",
+        notes=notes,
         items=data.items,
     )
-    # Inline create with forced buyer/party (create_order uses logged-in as buyer)
     return _create_order_as(
         db,
         viewer_account_id=distributor.id,
@@ -1059,6 +1068,8 @@ def get_rep_orders(db: Session, user: models.User):
         .order_by(models.Order.created_at.desc())
         .all()
     )
+    for o in orders:
+        _ = o.buyer, o.supplier, o.party, o.sales_rep
     return [_enrich_order(o, user.account_id) for o in orders]
 
 
@@ -1098,6 +1109,8 @@ def get_orders(
     if statuses:
         q = q.filter(models.Order.status.in_(statuses))
     orders = q.order_by(models.Order.created_at.desc()).all()
+    for o in orders:
+        _ = o.buyer, o.supplier, o.party, o.sales_rep
     return [_enrich_order(o, account.id) for o in orders]
 
 
@@ -1113,7 +1126,12 @@ def get_order(db: Session, account: models.Account, order_id: int):
         )
         .first()
     )
-    return _enrich_order(order, account.id) if order else None
+    if not order:
+        return None
+    _ = order.buyer, order.supplier, order.party, order.sales_rep, order.items
+    for it in order.items:
+        _ = it.product
+    return _enrich_order(order, account.id)
 
 
 def get_orders_summary(db: Session, account: models.Account, direction: str = "received"):

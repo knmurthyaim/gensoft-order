@@ -70,6 +70,7 @@ export function RepCustomers() {
 export function RepOrder() {
   const { partyId } = useParams();
   const navigate = useNavigate();
+  const { account } = useAuth();
   const [party, setParty] = useState(null);
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -188,7 +189,11 @@ export function RepOrder() {
       <h1 className="page-title" style={{ marginTop: 12 }}>
         Order for {party?.name || "…"}
       </h1>
-      <p className="page-sub">Your distributor stock only.</p>
+      <p className="page-sub">
+        This order is sent to your distributor
+        {account?.name ? ` (${account.name})` : ""} as a sales rep order for
+        this customer.
+      </p>
       {error && <div className="error-banner">{error}</div>}
 
       <div className="order-search-panel">
@@ -317,10 +322,16 @@ export function RepOrders() {
                 <td>
                   <strong>{o.order_no}</strong>
                   <div className="muted">
-                    {o.party?.name || "Customer"} · {o.item_count} items
+                    Customer: {o.party?.name || "—"} · {o.item_count} items
+                  </div>
+                  <div className="muted">
+                    To distributor: {o.supplier?.name || "—"}
                   </div>
                 </td>
-                <td>{o.status}</td>
+                <td>
+                  <span className="rep-order-tag">Sent to distributor</span>
+                  <div>{o.status}</div>
+                </td>
                 <td>{inr(o.total_amount)}</td>
               </tr>
             ))}

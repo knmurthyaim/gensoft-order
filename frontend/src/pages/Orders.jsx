@@ -5,7 +5,7 @@ export default function Orders() {
     <OrdersView
       direction="received"
       title="Orders Received"
-      subtitle="Orders placed to you by connected customers"
+      subtitle="Orders from retailers and from your sales reps (customer orders via rep)"
     />
   );
 }
