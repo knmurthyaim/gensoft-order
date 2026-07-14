@@ -19,6 +19,23 @@ function stockTone(avail, hidden) {
   return "ok";
 }
 
+/** Highlight query matches like Zennx search results */
+function highlightMatch(text, q) {
+  const value = text || "";
+  const term = (q || "").trim();
+  if (!term) return value;
+  const lower = value.toLowerCase();
+  const idx = lower.indexOf(term.toLowerCase());
+  if (idx < 0) return value;
+  return (
+    <>
+      {value.slice(0, idx)}
+      <mark className="search-mark">{value.slice(idx, idx + term.length)}</mark>
+      {value.slice(idx + term.length)}
+    </>
+  );
+}
+
 export default function Marketplace() {
   const navigate = useNavigate();
   const [suppliers, setSuppliers] = useState([]);
@@ -262,8 +279,8 @@ export default function Marketplace() {
         <div>
           <h1 className="page-title">Place Order</h1>
           <p className="page-sub">
-            Search and add products from a connected supplier — products are
-            loaded only when you search.
+            Select a supplier, then search &amp; add products (no full list
+            load).
           </p>
         </div>
       </div>
@@ -341,7 +358,7 @@ export default function Marketplace() {
                 ref={searchRef}
                 type="search"
                 className={`order-search-input${selected ? " selected" : ""}`}
-                placeholder="Search & select a product (required)"
+                placeholder="Search & Add Products"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -360,6 +377,13 @@ export default function Marketplace() {
               {searching && <span className="search-hint">Searching…</span>}
               {!searching && results.length > 0 && (
                 <ul className="order-suggest">
+                  <li className="suggest-head" aria-hidden="true">
+                    <span className="suggest-col-name">Product</span>
+                    <span className="suggest-col-scheme">Scheme</span>
+                    <span className="suggest-col-stock">Stock</span>
+                    <span className="suggest-col-price">MRP</span>
+                    <span className="suggest-col-price">PTR</span>
+                  </li>
                   {results.map((row, idx) => {
                     const avail = row.batch
                       ? row.batch.stock_hidden
@@ -367,6 +391,12 @@ export default function Marketplace() {
                         : row.batch.available_qty
                       : row.entry.product.total_stock;
                     const tone = stockTone(avail, row.batch?.stock_hidden);
+                    const scheme = row.batch?.scheme_hidden
+                      ? ""
+                      : row.batch?.scheme || "";
+                    const mrp = row.batch?.mrp || row.entry.product.mrp;
+                    const ptr =
+                      row.batch?.ptr_rate || row.entry.product.ptr_rate;
                     return (
                       <li
                         key={cartKey(row.entry, row.batch)}
@@ -381,32 +411,32 @@ export default function Marketplace() {
                           qtyRef.current?.focus();
                         }}
                       >
-                        <i className={`dot ${tone}`} />
-                        <div className="suggest-body">
-                          <strong>{row.entry.product.name}</strong>
+                        <div className="suggest-col-name">
+                          <strong>
+                            {highlightMatch(row.entry.product.name, debouncedQ)}
+                          </strong>
                           <span className="muted">
-                            {row.entry.product.product_code
-                              ? `${row.entry.product.product_code} · `
+                            {row.entry.product.manufacturer}
+                            {row.entry.product.pack_size
+                              ? ` · ${row.entry.product.pack_size}`
                               : ""}
-                            {row.entry.product.manufacturer} ·{" "}
-                            {row.entry.product.pack_size}
                             {row.batch
-                              ? ` · Batch ${row.batch.batch_no} · Exp ${fmtDate(row.batch.expiry_date)}`
+                              ? ` · ${row.batch.batch_no} · Exp ${fmtDate(row.batch.expiry_date)}`
                               : ""}
                           </span>
                         </div>
-                        <div className="suggest-meta">
-                          <span>
-                            {avail === null || avail === undefined
-                              ? "—"
-                              : avail}
-                          </span>
-                          <span>
-                            {inr(
-                              row.batch?.ptr_rate || row.entry.product.ptr_rate
-                            )}
-                          </span>
-                        </div>
+                        <span className="suggest-col-scheme">
+                          {scheme || "—"}
+                        </span>
+                        <span className={`suggest-col-stock stock-${tone}`}>
+                          {avail === null || avail === undefined
+                            ? "—"
+                            : avail > 0
+                              ? `Avl ${avail}`
+                              : "0 Stock"}
+                        </span>
+                        <span className="suggest-col-price">{inr(mrp)}</span>
+                        <span className="suggest-col-price">{inr(ptr)}</span>
                       </li>
                     );
                   })}
@@ -422,28 +452,31 @@ export default function Marketplace() {
                 )}
             </div>
 
-            <input
-              ref={qtyRef}
-              type="number"
-              min="1"
-              className="order-qty-input"
-              value={addQty}
-              onChange={(e) => setAddQty(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (!selected) {
-                    setError(
-                      "Product selection is required. Choose a product from the list."
-                    );
-                    searchRef.current?.focus();
-                    return;
+            <div className="order-qty-wrap">
+              <span className="qty-label">Qty</span>
+              <input
+                ref={qtyRef}
+                type="number"
+                min="1"
+                className="order-qty-input"
+                value={addQty}
+                onChange={(e) => setAddQty(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (!selected) {
+                      setError(
+                        "Product selection is required. Choose a product from the list."
+                      );
+                      searchRef.current?.focus();
+                      return;
+                    }
+                    addToCart(selected, addQty);
                   }
-                  addToCart(selected, addQty);
-                }
-              }}
-              title="Quantity"
-            />
+                }}
+                title="Quantity"
+              />
+            </div>
             <button
               type="button"
               className="btn order-add-btn"
@@ -464,6 +497,7 @@ export default function Marketplace() {
           </div>
 
           <div className="order-search-filters">
+            <div className="filter-title">Product Search Options</div>
             <label>
               <input
                 type="checkbox"
