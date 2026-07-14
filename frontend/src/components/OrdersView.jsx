@@ -198,7 +198,8 @@ export default function OrdersView({ direction, title, subtitle }) {
           <thead>
             <tr>
               <th>#</th>
-              <th>{isReceived ? "Customer / From" : "Supplier"}</th>
+              <th>{isReceived ? "Customer" : "Supplier"}</th>
+              <th>Sales Rep</th>
               <th>Items</th>
               <th>Total</th>
               <th>Status</th>
@@ -217,21 +218,34 @@ export default function OrdersView({ direction, title, subtitle }) {
                     {o.order_no}
                     <div className="muted">{fmtDateTime(o.created_at)}</div>
                     {isRepOrder && (
-                      <div className="rep-order-tag">Sales Rep Order</div>
+                      <div className="rep-order-tag">From Sales Rep</div>
                     )}
                   </td>
                   <td>
                     <strong>{customerName}</strong>
-                    {isReceived && o.sales_rep?.name && (
+                    {isReceived && (
                       <div className="muted">
-                        via Rep: {o.sales_rep.name}
+                        {isRepOrder
+                          ? "Customer order (via field force)"
+                          : counterparty?.gensoft_code || ""}
                       </div>
-                    )}
-                    {isReceived && !o.sales_rep?.name && counterparty?.gensoft_code && (
-                      <div className="muted">{counterparty.gensoft_code}</div>
                     )}
                     {!isReceived && (
                       <div className="muted">{counterparty?.gensoft_code}</div>
+                    )}
+                  </td>
+                  <td>
+                    {isReceived ? (
+                      o.sales_rep?.name ? (
+                        <>
+                          <strong>{o.sales_rep.name}</strong>
+                          <div className="muted">took this order</div>
+                        </>
+                      ) : (
+                        <span className="muted">—</span>
+                      )
+                    ) : (
+                      o.sales_rep?.name || "—"
                     )}
                   </td>
                   <td>{o.item_count}</td>
@@ -267,7 +281,7 @@ export default function OrdersView({ direction, title, subtitle }) {
             })}
             {orders.length === 0 && (
               <tr>
-                <td colSpan={6} className="empty">
+                <td colSpan={7} className="empty">
                   No orders found.
                 </td>
               </tr>
@@ -309,24 +323,18 @@ export default function OrdersView({ direction, title, subtitle }) {
         <Modal title={`Order ${detail.order_no}`} onClose={closeDetail} wide>
           <div className="detail-grid">
             <div>
-              <div className="muted">Customer</div>
+              <div className="muted">Customer (who ordered)</div>
               <strong>{detail.party?.name || detail.buyer?.name || "—"}</strong>
-              {detail.buyer?.name && detail.party?.name && (
-                <div className="muted">Account: {detail.buyer.name}</div>
-              )}
             </div>
             <div>
-              <div className="muted">Distributor</div>
+              <div className="muted">Distributor (order to)</div>
               <strong>{detail.supplier?.name}</strong>
             </div>
             <div>
-              <div className="muted">Sales Rep</div>
-              <strong>
-                {detail.sales_rep?.name ||
-                  (detail.source === "app" ? "Sales rep app" : "—")}
-              </strong>
+              <div className="muted">Sales Rep (who took order)</div>
+              <strong>{detail.sales_rep?.name || "—"}</strong>
               {detail.source === "app" && (
-                <div className="muted">Source: Sales Rep App</div>
+                <div className="muted">Placed from sales rep app</div>
               )}
             </div>
             <div>

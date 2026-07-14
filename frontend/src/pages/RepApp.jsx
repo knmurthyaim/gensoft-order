@@ -189,9 +189,8 @@ export function RepOrder() {
         Order for {party?.name || "…"}
       </h1>
       <p className="page-sub">
-        This order is sent to your distributor
-        {account?.name ? ` (${account.name})` : ""} as a sales rep order for
-        this customer.
+        Order is placed to {account?.name || "your distributor"} as an order
+        from this customer. Your name is saved as the sales rep who took it.
       </p>
       {error && <div className="error-banner">{error}</div>}
 

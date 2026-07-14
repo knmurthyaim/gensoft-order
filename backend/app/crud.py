@@ -903,12 +903,17 @@ def create_rep_order(
     if not party:
         raise AppError("Customer not found or not assigned to you")
 
-    # Buyer = linked GenSoft account when available; else distributor holds
-    # the order with party_id so Orders Received still lists it to the firm.
+    # Order is TO the distributor (Vajra), FROM the customer (Sri Dattha),
+    # TAKEN BY the sales rep (Naresh). Buyer account = customer's GenSoft
+    # login when linked so the retailer also sees it under their orders.
     buyer_id = party.linked_account_id or distributor.id
+    rep_name = rep.name if rep else user.name
     note = (data.notes or "").strip()
-    auto = f"Order from sales rep {rep.name if rep else user.name} for customer {party.name}"
-    notes = f"{auto}. {note}" if note else auto
+    auto = (
+        f"Customer {party.name} has given this order. "
+        f"Taken by sales rep {rep_name}."
+    )
+    notes = f"{auto} {note}".strip() if note else auto
 
     order_data = schemas.OrderCreate(
         supplier_account_id=distributor.id,
