@@ -166,14 +166,13 @@ export function RepOrder() {
     try {
       await repApi.createOrder({
         party_id: party.id,
-        source: "app",
         items: lines.map((l) => ({
           product_id: l.entry.product.id,
           qty: l.qty,
           rate: l.aggregate.ptr_rate,
         })),
       });
-      navigate("/rep/orders");
+      navigate("/rep/orders", { replace: true, state: { refresh: Date.now() } });
     } catch (e) {
       setError(e.response?.data?.detail || "Could not place order");
     } finally {
@@ -295,18 +294,34 @@ export function RepOrder() {
 export function RepOrders() {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true);
     repApi
       .orders()
       .then(setRows)
-      .catch((e) => setError(e.response?.data?.detail || "Failed to load orders"));
+      .catch((e) => setError(e.response?.data?.detail || "Failed to load orders"))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
   }, []);
 
   return (
     <div className="rep-page">
-      <h1 className="page-title">My Orders</h1>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">My Orders</h1>
+          <p className="page-sub">Orders you sent to your distributor</p>
+        </div>
+        <button type="button" className="btn secondary sm" onClick={load}>
+          Refresh
+        </button>
+      </div>
       {error && <div className="error-banner">{error}</div>}
+      {loading && <p className="muted">Loading…</p>}
       <div className="panel">
         <table>
           <thead>
@@ -335,7 +350,7 @@ export function RepOrders() {
                 <td>{inr(o.total_amount)}</td>
               </tr>
             ))}
-            {rows.length === 0 && (
+            {!loading && rows.length === 0 && (
               <tr>
                 <td colSpan={3} className="empty">
                   No orders yet.

@@ -1002,18 +1002,45 @@ def _create_order_as(
             if item.rate is None:
                 rate = batch.ptr_rate or product.ptr_rate
         else:
-            total_stock = sum(
-                b.available_qty
+            visible_batches = [
+                b
                 for b in product.stock_batches
                 if b.show_to_customer
+            ]
+            # Prefer earliest expiry (FEFO), then lower id
+            visible_batches.sort(
+                key=lambda b: (
+                    b.expiry_date is None,
+                    b.expiry_date or date.max,
+                    b.id or 0,
+                )
             )
+            total_stock = sum(b.available_qty for b in visible_batches)
+            needed = item.qty + item.free_qty
             if total_stock <= 0 and not allow_no_stock:
                 raise AppError(f"'{product.name}' is out of stock.")
-            if item.qty > total_stock and total_stock > 0 and not allow_over_stock:
+            if needed > total_stock and total_stock > 0 and not allow_over_stock:
                 raise AppError(
                     f"Insufficient stock for '{product.name}' "
                     f"(available: {total_stock})"
                 )
+            remaining = needed
+            allocated_batch_id = None
+            for b in visible_batches:
+                if remaining <= 0:
+                    break
+                if b.available_qty <= 0:
+                    continue
+                take = min(b.available_qty, remaining)
+                b.available_qty -= take
+                remaining -= take
+                if allocated_batch_id is None:
+                    allocated_batch_id = b.id
+                    if item.rate is None:
+                        rate = b.ptr_rate or product.ptr_rate
+            # Keep first allocated batch on order line for reference
+            if allocated_batch_id is not None and item.batch_id is None:
+                item.batch_id = allocated_batch_id
 
         taxable = max(rate * item.qty - item.scheme_discount, 0.0)
         gst_amount = round(taxable * gst_pct / 100, 2)
