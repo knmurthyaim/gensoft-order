@@ -577,7 +577,8 @@ export function RepShell({ children }) {
     let cancelled = false;
     let timer = null;
     let wakeLock = null;
-    let intervalMs = 10 * 60 * 1000;
+    let intervalMs = 60 * 1000;
+    let minMoveMeters = 50;
     let lastCaptureMs = 0;
     const LAST_KEY = "gensoft_rep_last_loc_ms";
 
@@ -641,19 +642,21 @@ export function RepShell({ children }) {
           } catch {
             /* ignore */
           }
-          // Always save on phone first (works without network)
-          enqueueLocation({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy_m:
-              typeof pos.coords.accuracy === "number"
-                ? pos.coords.accuracy
-                : null,
-            recorded_at: new Date(pos.timestamp || now).toISOString(),
-          });
+          // Save on phone only if moved ~50m+ (works without network)
+          enqueueLocation(
+            {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              accuracy_m:
+                typeof pos.coords.accuracy === "number"
+                  ? pos.coords.accuracy
+                  : null,
+              recorded_at: new Date(pos.timestamp || now).toISOString(),
+            },
+            minMoveMeters
+          );
           refreshPending();
           setLocStatus(navigator.onLine ? "sharing" : "pending");
-          // Then push any queued points when online
           syncToCloud();
         },
         (err) => {
@@ -666,19 +669,19 @@ export function RepShell({ children }) {
 
     const tick = () => {
       const now = Date.now();
-      if (now - lastCaptureMs < Math.min(intervalMs * 0.8, 8 * 60 * 1000)) {
+      if (now - lastCaptureMs < Math.min(intervalMs * 0.8, 45 * 1000)) {
         syncToCloud();
         return;
       }
       captureLocal();
     };
 
-    const startTracking = async (cfgIntervalSec) => {
-      intervalMs = Math.max(60, Number(cfgIntervalSec) || 600) * 1000;
+    const startTracking = async (cfg) => {
+      intervalMs = Math.max(30, Number(cfg?.interval_sec) || 60) * 1000;
+      minMoveMeters = Math.max(10, Number(cfg?.min_move_meters) || 50);
       setLocStatus(navigator.onLine ? "sharing" : "pending");
       await requestWake();
       refreshPending();
-      // Upload anything saved from earlier sessions first
       await syncToCloud();
       captureLocal();
       if (timer) clearInterval(timer);
@@ -715,7 +718,7 @@ export function RepShell({ children }) {
           setLocStatus("error");
           return;
         }
-        startTracking(cfg.interval_sec || 600);
+        startTracking(cfg);
         document.addEventListener("visibilitychange", onVisibility);
         window.addEventListener("online", onOnline);
       })
@@ -769,7 +772,7 @@ export function RepShell({ children }) {
           <div className="rep-header-sub">
             {salesRep?.name || user?.name} · {account?.name}
             {locStatus === "sharing" && (
-              <span className="rep-loc-badge"> · Loc every 10 min</span>
+              <span className="rep-loc-badge"> · Loc 1 min / 50m+</span>
             )}
             {locStatus === "pending" && (
               <span className="rep-loc-badge warn">

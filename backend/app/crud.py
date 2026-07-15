@@ -339,8 +339,19 @@ def delete_sales_rep(db: Session, account, rep_id) -> bool:
 
 
 LOCATION_RETENTION_DAYS = 7
-LOCATION_MIN_INTERVAL_SEC = 8 * 60  # allow slightly early vs 10-min client cadence
-LOCATION_INTERVAL_SEC = 10 * 60
+LOCATION_INTERVAL_SEC = 60  # check GPS every 1 minute
+LOCATION_MIN_MOVE_METERS = 50  # only store if moved ~50m from last point
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    from math import asin, cos, radians, sin, sqrt
+
+    r = 6371000.0
+    p1, p2 = radians(lat1), radians(lat2)
+    dp = radians(lat2 - lat1)
+    dl = radians(lon2 - lon1)
+    a = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2
+    return 2 * r * asin(sqrt(a))
 
 
 def _prune_old_locations(db: Session, owner_account_id: Optional[int] = None):
@@ -364,6 +375,7 @@ def get_rep_location_config(db: Session, user: models.User) -> schemas.RepLocati
         enabled=enabled,
         interval_sec=LOCATION_INTERVAL_SEC,
         retention_days=LOCATION_RETENTION_DAYS,
+        min_move_meters=LOCATION_MIN_MOVE_METERS,
     )
 
 
@@ -396,24 +408,25 @@ def record_rep_location(
     if recorded.tzinfo is None:
         recorded = recorded.replace(tzinfo=timezone.utc)
 
+    lat = float(data.latitude)
+    lng = float(data.longitude)
+
     last = (
         db.query(models.SalesRepLocation)
         .filter(models.SalesRepLocation.sales_rep_id == rep.id)
         .order_by(models.SalesRepLocation.recorded_at.desc())
         .first()
     )
-    if last and last.recorded_at:
-        last_at = last.recorded_at
-        if last_at.tzinfo is None:
-            last_at = last_at.replace(tzinfo=timezone.utc)
-        if (recorded - last_at).total_seconds() < LOCATION_MIN_INTERVAL_SEC:
-            return last  # rate limit — keep last point
+    if last:
+        dist = _haversine_m(last.latitude, last.longitude, lat, lng)
+        if dist < LOCATION_MIN_MOVE_METERS:
+            return last
 
     ping = models.SalesRepLocation(
         owner_account_id=account.id,
         sales_rep_id=rep.id,
-        latitude=float(data.latitude),
-        longitude=float(data.longitude),
+        latitude=lat,
+        longitude=lng,
         accuracy_m=float(data.accuracy_m) if data.accuracy_m is not None else None,
         recorded_at=recorded,
     )
@@ -426,7 +439,7 @@ def record_rep_location(
 def record_rep_locations_batch(
     db: Session, user: models.User, data: schemas.RepLocationBatch
 ) -> schemas.RepLocationBatchResult:
-    """Accept offline-queued GPS points; insert any not already near an existing ping."""
+    """Accept offline-queued GPS points; keep only moves of ~50m+."""
     if user.role != "rep" or not user.sales_rep_id or not user.account_id:
         raise AppError("Sales rep login required")
     account = (
@@ -451,28 +464,14 @@ def record_rep_locations_batch(
     _prune_old_locations(db, account.id)
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=LOCATION_RETENTION_DAYS)
-    existing = (
+    last = (
         db.query(models.SalesRepLocation)
-        .filter(
-            models.SalesRepLocation.sales_rep_id == rep.id,
-            models.SalesRepLocation.recorded_at >= cutoff,
-        )
-        .all()
+        .filter(models.SalesRepLocation.sales_rep_id == rep.id)
+        .order_by(models.SalesRepLocation.recorded_at.desc())
+        .first()
     )
-    existing_times: List[datetime] = []
-    for row in existing:
-        at = row.recorded_at
-        if at is None:
-            continue
-        if at.tzinfo is None:
-            at = at.replace(tzinfo=timezone.utc)
-        existing_times.append(at)
-
-    def too_close(candidate: datetime) -> bool:
-        for at in existing_times:
-            if abs((candidate - at).total_seconds()) < LOCATION_MIN_INTERVAL_SEC:
-                return True
-        return False
+    last_lat = last.latitude if last else None
+    last_lng = last.longitude if last else None
 
     saved = 0
     skipped = 0
@@ -488,21 +487,24 @@ def record_rep_locations_batch(
         if recorded < cutoff:
             skipped += 1
             continue
-        if too_close(recorded):
-            skipped += 1
-            continue
+        lat = float(item.latitude)
+        lng = float(item.longitude)
+        if last_lat is not None and last_lng is not None:
+            if _haversine_m(last_lat, last_lng, lat, lng) < LOCATION_MIN_MOVE_METERS:
+                skipped += 1
+                continue
         ping = models.SalesRepLocation(
             owner_account_id=account.id,
             sales_rep_id=rep.id,
-            latitude=float(item.latitude),
-            longitude=float(item.longitude),
+            latitude=lat,
+            longitude=lng,
             accuracy_m=float(item.accuracy_m)
             if item.accuracy_m is not None
             else None,
             recorded_at=recorded,
         )
         db.add(ping)
-        existing_times.append(recorded)
+        last_lat, last_lng = lat, lng
         saved += 1
 
     if saved:

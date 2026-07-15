@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { salesReps } from "../api";
-import { fmtDateTime } from "../format";
+import { fmtDateTime, parseApiDate, INDIA_TZ } from "../format";
 
 function mapsUrl(lat, lng) {
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`;
-}
-
-function embedUrl(lat, lng) {
-  const d = 0.01;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - d}%2C${lat - d}%2C${lng + d}%2C${lat + d}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
 function ageLabel(minutes) {
@@ -21,10 +16,165 @@ function ageLabel(minutes) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Calendar day key in IST (YYYY-MM-DD). */
+function dayKeyIST(iso) {
+  const d = parseApiDate(iso);
+  if (!d) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: INDIA_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function formatDayLabel(ymd) {
+  if (!ymd) return "";
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 6, 30)); // midday-ish IST
+  return dt.toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: INDIA_TZ,
+  });
+}
+
+function todayKeyIST() {
+  return dayKeyIST(new Date().toISOString());
+}
+
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  return new Promise((resolve, reject) => {
+    const cssHref = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    if (![...document.styleSheets].some((s) => s.href === cssHref)) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = cssHref;
+      document.head.appendChild(link);
+    }
+    const existing = document.querySelector("script[data-leaflet]");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.L));
+      existing.addEventListener("error", reject);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.dataset.leaflet = "1";
+    script.onload = () => resolve(window.L);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+function DayRouteMap({ points }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+
+  const ordered = useMemo(() => {
+    return [...(points || [])].sort(
+      (a, b) =>
+        (parseApiDate(a.recorded_at)?.getTime() || 0) -
+        (parseApiDate(b.recorded_at)?.getTime() || 0)
+    );
+  }, [points]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function draw() {
+      if (!containerRef.current) return;
+      const L = await loadLeaflet();
+      if (cancelled || !containerRef.current) return;
+
+      if (!mapRef.current) {
+        mapRef.current = L.map(containerRef.current, {
+          zoomControl: true,
+          attributionControl: true,
+        });
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap",
+        }).addTo(mapRef.current);
+      }
+
+      if (layerRef.current) {
+        mapRef.current.removeLayer(layerRef.current);
+        layerRef.current = null;
+      }
+
+      const group = L.layerGroup().addTo(mapRef.current);
+      layerRef.current = group;
+
+      if (!ordered.length) {
+        mapRef.current.setView([17.385, 78.4867], 12);
+        return;
+      }
+
+      const latLngs = ordered.map((p) => [p.latitude, p.longitude]);
+      if (latLngs.length >= 2) {
+        L.polyline(latLngs, {
+          color: "#1565c0",
+          weight: 4,
+          opacity: 0.9,
+          lineJoin: "round",
+        }).addTo(group);
+      }
+
+      ordered.forEach((p, i) => {
+        const isStart = i === 0;
+        const isEnd = i === ordered.length - 1;
+        const color = isStart ? "#2e7d32" : isEnd ? "#c62828" : "#1565c0";
+        const radius = isStart || isEnd ? 7 : 4;
+        L.circleMarker([p.latitude, p.longitude], {
+          radius,
+          color,
+          fillColor: color,
+          fillOpacity: 0.95,
+          weight: 2,
+        })
+          .bindPopup(
+            `${fmtDateTime(p.recorded_at)} IST<br/>${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`
+          )
+          .addTo(group);
+      });
+
+      if (latLngs.length === 1) {
+        mapRef.current.setView(latLngs[0], 15);
+      } else {
+        mapRef.current.fitBounds(L.latLngBounds(latLngs), { padding: [28, 28] });
+      }
+      setTimeout(() => mapRef.current?.invalidateSize(), 50);
+    }
+
+    draw().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ordered]);
+
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        layerRef.current = null;
+      }
+    };
+  }, []);
+
+  return <div ref={containerRef} className="rep-track-map" />;
+}
+
 export default function RepTracking() {
   const [rows, setRows] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [trail, setTrail] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(todayKeyIST());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -54,8 +204,18 @@ export default function RepTracking() {
       return;
     }
     salesReps
-      .locationTrail(selectedId, { limit: 200 })
-      .then(setTrail)
+      .locationTrail(selectedId, { limit: 500 })
+      .then((data) => {
+        const points = data || [];
+        setTrail(points);
+        const days = [
+          ...new Set(points.map((p) => dayKeyIST(p.recorded_at)).filter(Boolean)),
+        ].sort();
+        const today = todayKeyIST();
+        if (days.includes(today)) setSelectedDay(today);
+        else if (days.length) setSelectedDay(days[days.length - 1]);
+        else setSelectedDay(today);
+      })
       .catch(() => setTrail([]));
   }, [selectedId]);
 
@@ -64,14 +224,41 @@ export default function RepTracking() {
     [rows, selectedId]
   );
 
+  const dayOptions = useMemo(() => {
+    const fromTrail = trail
+      .map((p) => dayKeyIST(p.recorded_at))
+      .filter(Boolean);
+    const set = new Set(fromTrail);
+    // Always include today + last 6 days so user can browse empty days too
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+      set.add(dayKeyIST(d.toISOString()));
+    }
+    return [...set].sort().reverse();
+  }, [trail]);
+
+  const dayPoints = useMemo(() => {
+    return trail
+      .filter((p) => dayKeyIST(p.recorded_at) === selectedDay)
+      .sort(
+        (a, b) =>
+          (parseApiDate(a.recorded_at)?.getTime() || 0) -
+          (parseApiDate(b.recorded_at)?.getTime() || 0)
+      );
+  }, [trail, selectedDay]);
+
+  const hasAnyGps =
+    (selected && selected.latitude != null) || trail.length > 0;
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Rep Location</h1>
           <p className="page-sub">
-            Positions are saved on the rep&apos;s phone every 10 minutes, then
-            uploaded when they open GenSoft or get network. History is kept for
+            Select a day to draw that day&apos;s route line on the map (IST).
+            Phone checks every 1 min and saves only moves of 50m+. History
             7 days. Enable in{" "}
             <Link to="/settings">Settings → Sales Rep Tracking</Link>.
           </p>
@@ -98,7 +285,9 @@ export default function RepTracking() {
                 <tr
                   key={r.sales_rep_id}
                   className={
-                    selectedId === r.sales_rep_id ? "rep-track-row active" : "rep-track-row"
+                    selectedId === r.sales_rep_id
+                      ? "rep-track-row active"
+                      : "rep-track-row"
                   }
                   onClick={() => setSelectedId(r.sales_rep_id)}
                 >
@@ -109,7 +298,9 @@ export default function RepTracking() {
                   <td>
                     <span
                       className={
-                        r.latitude != null ? "status-pill accepted" : "status-pill pending"
+                        r.latitude != null
+                          ? "status-pill accepted"
+                          : "status-pill pending"
                       }
                     >
                       {ageLabel(r.age_minutes)}
@@ -147,51 +338,85 @@ export default function RepTracking() {
 
         <div className="panel rep-track-detail">
           {!selected && (
-            <div className="empty">Select a sales rep to view map &amp; 7-day trail.</div>
+            <div className="empty">
+              Select a sales rep to view day route on the map.
+            </div>
           )}
-          {selected && selected.latitude == null && (
+          {selected && !hasAnyGps && (
             <div className="empty">
               No GPS yet for <strong>{selected.sales_rep_name}</strong>. They must
               open the GenSoft rep app and allow location while Settings tracking
               is ON.
             </div>
           )}
-          {selected && selected.latitude != null && (
+          {selected && hasAnyGps && (
             <>
               <div className="rep-track-detail-head">
                 <div>
                   <strong>{selected.sales_rep_name}</strong>
                   <div className="muted">
-                    {selected.latitude.toFixed(5)}, {selected.longitude.toFixed(5)}
-                    {selected.accuracy_m != null
-                      ? ` · ±${Math.round(selected.accuracy_m)}m`
-                      : ""}
+                    {dayPoints.length} point
+                    {dayPoints.length === 1 ? "" : "s"} on{" "}
+                    {formatDayLabel(selectedDay)}
                   </div>
                 </div>
-                <a
-                  className="btn sm"
-                  href={mapsUrl(selected.latitude, selected.longitude)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open map
-                </a>
-              </div>
-              <iframe
-                title="Sales rep map"
-                className="rep-track-map"
-                src={embedUrl(selected.latitude, selected.longitude)}
-              />
-              <h3 className="rep-track-trail-title">Trail (last 7 days)</h3>
-              <div className="rep-track-trail">
-                {trail.length === 0 && (
-                  <div className="muted">No history points yet.</div>
+                {dayPoints.length > 0 && (
+                  <a
+                    className="btn sm"
+                    href={mapsUrl(
+                      dayPoints[dayPoints.length - 1].latitude,
+                      dayPoints[dayPoints.length - 1].longitude
+                    )}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open map
+                  </a>
                 )}
-                {trail.map((p) => (
+              </div>
+
+              <div className="rep-track-daybar">
+                <label className="muted" htmlFor="rep-track-day">
+                  Day (IST)
+                </label>
+                <select
+                  id="rep-track-day"
+                  className="rep-track-day-select"
+                  value={selectedDay}
+                  onChange={(e) => setSelectedDay(e.target.value)}
+                >
+                  {dayOptions.map((d) => {
+                    const count = trail.filter(
+                      (p) => dayKeyIST(p.recorded_at) === d
+                    ).length;
+                    return (
+                      <option key={d} value={d}>
+                        {formatDayLabel(d)}
+                        {count ? ` · ${count} pts` : " · no data"}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {dayPoints.length === 0 ? (
+                <div className="empty" style={{ marginTop: 12 }}>
+                  No location points for this day.
+                </div>
+              ) : (
+                <DayRouteMap points={dayPoints} />
+              )}
+
+              <h3 className="rep-track-trail-title">
+                Points on {formatDayLabel(selectedDay)}
+              </h3>
+              <div className="rep-track-trail">
+                {dayPoints.length === 0 && (
+                  <div className="muted">No history for this day.</div>
+                )}
+                {[...dayPoints].reverse().map((p) => (
                   <div key={p.id} className="rep-track-trail-row">
-                    <span>
-                      {fmtDateTime(p.recorded_at)} IST
-                    </span>
+                    <span>{fmtDateTime(p.recorded_at)} IST</span>
                     <a
                       href={mapsUrl(p.latitude, p.longitude)}
                       target="_blank"

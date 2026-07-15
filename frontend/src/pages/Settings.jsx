@@ -73,7 +73,7 @@ const SECTIONS = [
         key: "track_salesrep_location",
         label: "TRACK SALES REP LOCATION",
         yesHelp:
-          "Yes: Rep phone saves GPS every 10 min (even offline). Points upload to cloud when the app opens or network returns. Visible only to you for 7 days.",
+          "Yes: Rep phone checks GPS every 1 minute. Saves only if moved 50m+. Offline points upload when the app opens or network returns. Visible only to you for 7 days.",
         noHelp:
           "No: Location is not collected from sales reps.",
       },

@@ -1,8 +1,10 @@
 /** Local GPS queue on the rep phone — sync to cloud when online. */
 
 const QUEUE_KEY = "gensoft_rep_loc_queue_v1";
-const MAX_POINTS = 1200; // ~7 days @ 10 min
+const MAX_POINTS = 10080; // ~7 days @ 1 min max
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MIN_MOVE_METERS = 50;
+const MIN_GAP_MS = 45 * 1000;
 
 function readQueue() {
   try {
@@ -19,7 +21,6 @@ function writeQueue(list) {
   try {
     localStorage.setItem(QUEUE_KEY, JSON.stringify(list.slice(-MAX_POINTS)));
   } catch {
-    /* quota — drop oldest half */
     try {
       const half = list.slice(Math.floor(list.length / 2));
       localStorage.setItem(QUEUE_KEY, JSON.stringify(half));
@@ -37,12 +38,29 @@ function prune(list) {
   });
 }
 
+/** Distance in meters between two lat/lng points. */
+export function haversineMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const r = 6371000;
+  const p1 = toRad(lat1);
+  const p2 = toRad(lat2);
+  const dp = toRad(lat2 - lat1);
+  const dl = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dp / 2) ** 2 +
+    Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * r * Math.asin(Math.sqrt(a));
+}
+
 export function queueCount() {
   return prune(readQueue()).length;
 }
 
-/** Save a GPS fix on the phone (works offline). */
-export function enqueueLocation(point) {
+/**
+ * Save a GPS fix on the phone (works offline).
+ * Skips if moved less than 50m from the last saved point.
+ */
+export function enqueueLocation(point, minMoveMeters = MIN_MOVE_METERS) {
   const id =
     point.local_id ||
     `loc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -54,13 +72,26 @@ export function enqueueLocation(point) {
     recorded_at: point.recorded_at || new Date().toISOString(),
   };
   const next = prune(readQueue());
-  // skip if last point was < 8 minutes ago (same cadence as server)
   const last = next[next.length - 1];
   if (last) {
     const gap =
       Date.parse(entry.recorded_at) - Date.parse(last.recorded_at || 0);
-    if (Number.isFinite(gap) && gap < 8 * 60 * 1000) {
+    if (Number.isFinite(gap) && gap < MIN_GAP_MS) {
       return { queued: false, count: next.length, reason: "too_soon" };
+    }
+    const dist = haversineMeters(
+      last.latitude,
+      last.longitude,
+      entry.latitude,
+      entry.longitude
+    );
+    if (dist < minMoveMeters) {
+      return {
+        queued: false,
+        count: next.length,
+        reason: "too_close",
+        meters: Math.round(dist),
+      };
     }
   }
   next.push(entry);
@@ -98,7 +129,6 @@ export async function flushLocationQueue(postBatch) {
     };
   }
 
-  // All pending were offered; clear queue (duplicates counted as skipped server-side)
   writeQueue([]);
   return {
     synced: res?.saved ?? pending.length,
