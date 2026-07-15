@@ -1969,7 +1969,7 @@ textarea {
 
 .rep-track-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr);
+  grid-template-columns: minmax(200px, 0.75fr) minmax(360px, 1.8fr);
   gap: 16px;
   align-items: start;
 }
@@ -1978,6 +1978,31 @@ textarea {
   .rep-track-layout {
     grid-template-columns: 1fr;
   }
+}
+
+.rep-track-list {
+  font-size: 13px;
+}
+
+.rep-track-list table th,
+.rep-track-list table td {
+  padding: 6px 8px;
+  font-size: 12px;
+  vertical-align: top;
+}
+
+.rep-track-list table th {
+  font-size: 11px;
+}
+
+.rep-track-list .btn.sm {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.rep-track-list .status-pill {
+  font-size: 11px;
+  padding: 1px 6px;
 }
 
 .rep-track-row {
@@ -2015,7 +2040,7 @@ textarea {
 
 .rep-track-map {
   width: 100%;
-  height: 320px;
+  height: 460px;
   border: 1px solid var(--border);
   border-radius: 8px;
   z-index: 0;
