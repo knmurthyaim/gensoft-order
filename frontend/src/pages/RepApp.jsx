@@ -27,21 +27,35 @@ function aggregate(entry) {
 export function RepCustomers() {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    repApi
-      .customers(q ? { search: q } : undefined)
-      .then(setRows)
-      .catch((e) => setError(e.response?.data?.detail || "Failed to load parties"));
+    const t = setTimeout(() => setDebounced(q.trim()), 300);
+    return () => clearTimeout(t);
   }, [q]);
+
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    repApi
+      .customers(
+        debounced
+          ? { search: debounced, limit: 100 }
+          : { limit: 80 }
+      )
+      .then(setRows)
+      .catch((e) => setError(e.response?.data?.detail || "Failed to load parties"))
+      .finally(() => setLoading(false));
+  }, [debounced]);
 
   return (
     <div className="rep-page">
       <h1 className="page-title">Parties</h1>
       <p className="page-sub">
-        All customers from your distributor party master. Place an order for any
-        party — it is recorded under your name.
+        Search your distributor party master, then place an order. Your name is
+        saved on the order.
       </p>
       {error && <div className="error-banner">{error}</div>}
       <input
@@ -49,8 +63,15 @@ export function RepCustomers() {
         placeholder="Search party name, code, area..."
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
+        style={{ marginBottom: 8, width: "100%", maxWidth: 420 }}
       />
+      <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
+        {loading
+          ? "Loading…"
+          : debounced
+            ? `Showing up to ${rows.length} match${rows.length === 1 ? "" : "es"}`
+            : `Showing first ${rows.length} parties — type to search all`}
+      </p>
       <div className="rep-customer-list">
         {rows.map((p) => (
           <Link key={p.id} to={`/rep/order/${p.id}`} className="rep-customer-card">
@@ -63,8 +84,12 @@ export function RepCustomers() {
             <span className="rep-order-cta">Place order →</span>
           </Link>
         ))}
-        {rows.length === 0 && (
-          <div className="empty">No parties in distributor master yet.</div>
+        {!loading && rows.length === 0 && (
+          <div className="empty">
+            {debounced
+              ? "No matching parties."
+              : "No parties in distributor master yet."}
+          </div>
         )}
       </div>
     </div>
@@ -88,28 +113,27 @@ export function RepOrder() {
 
   useEffect(() => {
     repApi
-      .customers()
-      .then((list) => {
-        const p = list.find((x) => String(x.id) === String(partyId));
-        if (!p) setError("Party not found in distributor master.");
-        else setParty(p);
-      })
-      .catch(() => setError("Failed to load party."));
+      .customer(partyId)
+      .then(setParty)
+      .catch((e) =>
+        setError(e.response?.data?.detail || "Party not found in distributor master.")
+      );
   }, [partyId]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 250);
+    const t = setTimeout(() => setDebounced(query.trim()), 350);
     return () => clearTimeout(t);
   }, [query]);
 
   useEffect(() => {
-    if (!debounced) {
+    // Need 2+ characters so one letter ("d") does not scan the whole catalog
+    if (debounced.length < 2) {
       setResults([]);
       return;
     }
     let cancelled = false;
     repApi
-      .catalog({ q: debounced, limit: 30 })
+      .catalog({ q: debounced, limit: 20 })
       .then((data) => {
         if (cancelled) return;
         setResults(
@@ -202,13 +226,18 @@ export function RepOrder() {
         <input
           ref={searchRef}
           className="order-search-input"
-          placeholder="Search products..."
+          placeholder="Type 2+ letters to search stock..."
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setSelected(null);
           }}
         />
+        {query.trim().length === 1 && !selected && (
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+            Type one more letter to search…
+          </p>
+        )}
         {selected && (
           <div className="selected-product-chip">
             Selected: <strong>{selected.entry.product.name}</strong>
@@ -375,23 +404,23 @@ export function RepStock() {
   useEffect(() => {
     const t = setTimeout(() => {
       repApi
-        .stock(q ? { search: q, limit: 150 } : { limit: 150 })
+        .stock(q.trim() ? { search: q.trim(), limit: 80 } : { limit: 60 })
         .then((data) => setItems(data.items || []))
         .catch((e) =>
           setError(e.response?.data?.detail || "Failed to load stock")
         );
-    }, 200);
+    }, 300);
     return () => clearTimeout(t);
   }, [q]);
 
   return (
     <div className="rep-page">
       <h1 className="page-title">Stock</h1>
-      <p className="page-sub">Your distributor stock (read only).</p>
+      <p className="page-sub">Your distributor stock only (read only).</p>
       {error && <div className="error-banner">{error}</div>}
       <input
         className="search-input"
-        placeholder="Search product..."
+        placeholder="Search product name or code..."
         value={q}
         onChange={(e) => setQ(e.target.value)}
         style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
@@ -535,6 +564,69 @@ export function RepOutstanding() {
 
 export function RepShell({ children }) {
   const { user, account, salesRep, logout } = useAuth();
+  const [locStatus, setLocStatus] = useState(""); // off | sharing | denied | error
+
+  useEffect(() => {
+    let watchId = null;
+    let cancelled = false;
+    let lastSent = 0;
+
+    const send = (pos) => {
+      const now = Date.now();
+      if (now - lastSent < 55000) return;
+      lastSent = now;
+      repApi
+        .postLocation({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy_m:
+            typeof pos.coords.accuracy === "number" ? pos.coords.accuracy : null,
+          recorded_at: new Date(pos.timestamp || now).toISOString(),
+        })
+        .then((res) => {
+          if (cancelled) return;
+          if (res?.accepted) setLocStatus("sharing");
+          else setLocStatus("off");
+        })
+        .catch(() => {
+          if (!cancelled) setLocStatus("error");
+        });
+    };
+
+    repApi
+      .locationConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        if (!cfg?.enabled) {
+          setLocStatus("off");
+          return;
+        }
+        if (!navigator.geolocation) {
+          setLocStatus("error");
+          return;
+        }
+        setLocStatus("sharing");
+        watchId = navigator.geolocation.watchPosition(
+          send,
+          (err) => {
+            if (cancelled) return;
+            setLocStatus(err?.code === 1 ? "denied" : "error");
+          },
+          { enableHighAccuracy: true, maximumAge: 60000, timeout: 20000 }
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setLocStatus("off");
+      });
+
+    return () => {
+      cancelled = true;
+      if (watchId != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, []);
+
   return (
     <div className="rep-app">
       <header className="rep-header">
@@ -542,6 +634,12 @@ export function RepShell({ children }) {
           <div className="zennx-logo">GenSoft</div>
           <div className="rep-header-sub">
             {salesRep?.name || user?.name} · {account?.name}
+            {locStatus === "sharing" && (
+              <span className="rep-loc-badge"> · Location on</span>
+            )}
+            {locStatus === "denied" && (
+              <span className="rep-loc-badge warn"> · Location blocked</span>
+            )}
           </div>
         </div>
         <button className="logout-btn" onClick={logout}>

@@ -29,14 +29,31 @@ def _mask_batch(batch_dict: dict, settings: schemas.DistributorSettings):
 @router.get("/customers", response_model=List[schemas.Party])
 def list_customers(
     search: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=200),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_rep(user)
     try:
-        return crud.get_rep_customers(db, user, search)
+        return crud.get_rep_customers(db, user, search, limit=limit)
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/customers/{party_id}", response_model=schemas.Party)
+def get_customer(
+    party_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_rep(user)
+    try:
+        party = crud.get_rep_customer(db, user, party_id)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not party:
+        raise HTTPException(status_code=404, detail="Party not found")
+    return party
 
 
 @router.get("/stock")
@@ -86,7 +103,7 @@ def list_outstanding(
 def search_catalog(
     q: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    limit: int = Query(40, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=40),
     in_stock_only: bool = Query(False),
     first_word_exact: bool = Query(False),
     scheme_only: bool = Query(False),
@@ -111,10 +128,13 @@ def search_catalog(
     items = []
     for entry in catalog:
         product = schemas.Product.model_validate(entry["product"]).model_dump()
-        batches = [
-            _mask_batch(schemas.StockBatch.model_validate(b).model_dump(), settings)
-            for b in entry["batches"]
-        ]
+        batches = []
+        for b in entry["batches"]:
+            if isinstance(b, dict):
+                batch_dict = dict(b)
+            else:
+                batch_dict = schemas.StockBatch.model_validate(b).model_dump()
+            batches.append(_mask_batch(batch_dict, settings))
         items.append({"product": product, "batches": batches})
     return {"settings": settings, "items": items, "query": term}
 
@@ -142,3 +162,36 @@ def list_orders(
         return crud.get_rep_orders(db, user)
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/location-config", response_model=schemas.RepLocationConfig)
+def location_config(
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_rep(user)
+    try:
+        return crud.get_rep_location_config(db, user)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/location")
+def post_location(
+    data: schemas.RepLocationPing,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Sales rep GPS ping. Stored only if distributor enabled tracking."""
+    _require_rep(user)
+    try:
+        ping = crud.record_rep_location(db, user, data)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if ping is None:
+        return {"accepted": False, "reason": "tracking_disabled"}
+    return {
+        "accepted": True,
+        "id": ping.id,
+        "recorded_at": ping.recorded_at,
+    }

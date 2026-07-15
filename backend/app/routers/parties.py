@@ -1,7 +1,7 @@
 from io import BytesIO
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy.orm import Session
@@ -46,10 +46,11 @@ CUSTOMER_SAMPLE_ROW = [
 def list_parties(
     search: Optional[str] = None,
     location: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=300),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    return crud.get_parties(db, account, search, location)
+    return crud.get_parties(db, account, search, location, limit=limit)
 
 
 @router.get("/upload/template")

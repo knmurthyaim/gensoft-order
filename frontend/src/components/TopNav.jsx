@@ -24,6 +24,7 @@ export default function TopNav() {
     { to: "/parties", label: "Parties" },
     { to: "/outstanding", label: "Outstanding" },
     { to: "/sales-reps", label: "Sales Reps", show: isDistributor },
+    { to: "/rep-tracking", label: "Rep Location", show: isDistributor },
     { to: "/connections", label: "Connections" },
     { to: "/import", label: "Import", show: isDistributor },
     { to: "/settings", label: "Settings", show: isDistributor },

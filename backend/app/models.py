@@ -46,6 +46,7 @@ class Account(Base):
     hide_scheme_from_parties = Column(Boolean, default=True)
     hide_scheme_from_salesrep = Column(Boolean, default=True)
     hide_hold_products_from_salesrep = Column(Boolean, default=False)
+    track_salesrep_location = Column(Boolean, default=False)
     minimum_order_value = Column(Float, default=0.0)
     no_order_from = Column(DateTime, nullable=True)
     no_order_to = Column(DateTime, nullable=True)
@@ -83,10 +84,10 @@ class Party(Base):
     __tablename__ = "parties"
 
     id = Column(Integer, primary_key=True, index=True)
-    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
     code = Column(String, default="", index=True)
     name = Column(String, nullable=False, index=True)
-    party_type = Column(String, default="customer")  # customer, supplier
+    party_type = Column(String, default="customer", index=True)  # customer, supplier
     address = Column(String, default="")
     area = Column(String, default="")
     city = Column(String, default="Hyderabad")
@@ -117,13 +118,34 @@ class SalesRep(Base):
     created_at = Column(DateTime, default=utcnow)
 
     owner = relationship("Account", back_populates="sales_reps")
+    locations = relationship(
+        "SalesRepLocation",
+        back_populates="sales_rep",
+        cascade="all, delete-orphan",
+    )
+
+
+class SalesRepLocation(Base):
+    """GPS pings from sales rep app. Kept for 7 days; distributor-only reads."""
+
+    __tablename__ = "sales_rep_locations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    sales_rep_id = Column(Integer, ForeignKey("sales_reps.id"), nullable=False, index=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    accuracy_m = Column(Float, nullable=True)
+    recorded_at = Column(DateTime, default=utcnow, index=True)
+
+    sales_rep = relationship("SalesRep", back_populates="locations")
 
 
 class Product(Base):
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, index=True)
-    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
     product_code = Column(String, default="", index=True)
     name = Column(String, nullable=False, index=True)
     manufacturer = Column(String, default="")
@@ -149,8 +171,8 @@ class StockBatch(Base):
     __tablename__ = "stock_batches"
 
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    owner_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
     batch_no = Column(String, default="")
     expiry_date = Column(Date, nullable=True)
     available_qty = Column(Integer, nullable=False, default=0)

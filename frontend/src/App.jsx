@@ -11,6 +11,7 @@ import Products from "./pages/Products.jsx";
 import Stock from "./pages/Stock.jsx";
 import Parties from "./pages/Parties.jsx";
 import SalesReps from "./pages/SalesReps.jsx";
+import RepTracking from "./pages/RepTracking.jsx";
 import Connections from "./pages/Connections.jsx";
 import Settings from "./pages/Settings.jsx";
 import Outstanding from "./pages/Outstanding.jsx";
@@ -75,6 +76,7 @@ export default function App() {
           <Route path="/parties" element={<Parties />} />
           <Route path="/outstanding" element={<Outstanding />} />
           <Route path="/sales-reps" element={<SalesReps />} />
+          <Route path="/rep-tracking" element={<RepTracking />} />
           <Route path="/connections" element={<Connections />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/import" element={<DataImport />} />

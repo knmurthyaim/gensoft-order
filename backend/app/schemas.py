@@ -388,6 +388,7 @@ class DistributorSettings(BaseModel):
     hide_scheme_from_parties: bool = True
     hide_scheme_from_salesrep: bool = True
     hide_hold_products_from_salesrep: bool = False
+    track_salesrep_location: bool = False
     minimum_order_value: float = 0.0
     no_order_from: Optional[datetime] = None
     no_order_to: Optional[datetime] = None
@@ -402,10 +403,44 @@ class DistributorSettingsUpdate(BaseModel):
     hide_scheme_from_parties: Optional[bool] = None
     hide_scheme_from_salesrep: Optional[bool] = None
     hide_hold_products_from_salesrep: Optional[bool] = None
+    track_salesrep_location: Optional[bool] = None
     minimum_order_value: Optional[float] = Field(default=None, ge=0)
     no_order_from: Optional[datetime] = None
     no_order_to: Optional[datetime] = None
     no_order_full_day: Optional[bool] = None
+
+
+class RepLocationPing(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy_m: Optional[float] = Field(default=None, ge=0)
+    recorded_at: Optional[datetime] = None
+
+
+class RepLocationConfig(BaseModel):
+    enabled: bool = False
+    interval_sec: int = 120
+    retention_days: int = 7
+
+
+class SalesRepLocationPoint(BaseModel):
+    id: int
+    sales_rep_id: int
+    latitude: float
+    longitude: float
+    accuracy_m: Optional[float] = None
+    recorded_at: datetime
+
+
+class SalesRepLocationLatest(BaseModel):
+    sales_rep_id: int
+    sales_rep_name: str
+    phone: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    accuracy_m: Optional[float] = None
+    recorded_at: Optional[datetime] = None
+    age_minutes: Optional[int] = None
 
 
 # ---------- Super Admin ----------
@@ -506,7 +541,11 @@ class OutstandingBillUploadItem(BaseModel):
     amount: float = Field(ge=0)
     paid: float = Field(ge=0, default=0)
     balance: Optional[float] = Field(default=None, ge=0)
-    age: Optional[int] = Field(default=None, ge=0)
+    age: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Ignored when invoice_date is set; age is calculated from invoice date.",
+    )
     discount: float = Field(ge=0, default=0)
 
 

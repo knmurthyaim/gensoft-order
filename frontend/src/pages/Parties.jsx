@@ -20,6 +20,7 @@ export default function Parties() {
   const [rows, setRows] = useState([]);
   const [reps, setReps] = useState([]);
   const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
@@ -27,17 +28,29 @@ export default function Parties() {
   const [directory, setDirectory] = useState([]);
   const [dirSearch, setDirSearch] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const load = (q = "") =>
-    partiesApi
-      .list(q ? { search: q } : undefined)
+  const load = (q = "") => {
+    setLoading(true);
+    return partiesApi
+      .list(q ? { search: q, limit: 100 } : { limit: 100 })
       .then(setRows)
-      .catch(() => setError("Failed to load parties."));
+      .catch(() => setError("Failed to load parties."))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    load();
     repApi.list().then(setReps).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    load(debounced);
+  }, [debounced]);
 
   const repMap = Object.fromEntries(reps.map((r) => [r.id, r.name]));
 
@@ -76,7 +89,7 @@ export default function Parties() {
       if (editing) await partiesApi.update(editing.id, payload);
       else await partiesApi.create(payload);
       setShowModal(false);
-      load(search);
+      load(debounced);
     } catch (err) {
       setError(err.response?.data?.detail || "Save failed.");
     }
@@ -85,7 +98,7 @@ export default function Parties() {
   const remove = async (p) => {
     if (!confirm(`Delete "${p.name}"?`)) return;
     await partiesApi.remove(p.id);
-    load(search);
+    load(debounced);
   };
 
   const openLink = (p) => {
@@ -97,7 +110,7 @@ export default function Parties() {
   const doLink = async (accountId) => {
     await partiesApi.link(linkRow.id, accountId);
     setLinkRow(null);
-    load(search);
+    load(debounced);
   };
 
   const dirFiltered = directory.filter(
@@ -127,14 +140,21 @@ export default function Parties() {
       <div className="toolbar">
         <input
           className="search-input"
-          placeholder="Search parties..."
+          placeholder="Search parties by name, code, area..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
-            load(e.target.value);
+            setError("");
           }}
         />
       </div>
+      <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+        {loading
+          ? "Loading…"
+          : debounced
+            ? `Showing up to ${rows.length} match${rows.length === 1 ? "" : "es"}`
+            : `Showing first ${rows.length} parties — search to find others`}
+      </p>
 
       <div className="panel">
         <table>
@@ -190,10 +210,10 @@ export default function Parties() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && (
+            {!loading && rows.length === 0 && (
               <tr>
                 <td colSpan={9} className="empty">
-                  No parties found.
+                  {debounced ? "No parties match your search." : "No parties found."}
                 </td>
               </tr>
             )}

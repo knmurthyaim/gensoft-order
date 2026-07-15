@@ -89,6 +89,9 @@ def get_distributor_settings(account: models.Account) -> schemas.DistributorSett
         hide_hold_products_from_salesrep=bool(
             account.hide_hold_products_from_salesrep
         ),
+        track_salesrep_location=bool(
+            getattr(account, "track_salesrep_location", False)
+        ),
         minimum_order_value=float(account.minimum_order_value or 0),
         no_order_from=account.no_order_from,
         no_order_to=account.no_order_to,
@@ -335,32 +338,224 @@ def delete_sales_rep(db: Session, account, rep_id) -> bool:
     return True
 
 
+LOCATION_RETENTION_DAYS = 7
+LOCATION_MIN_INTERVAL_SEC = 60
+
+
+def _prune_old_locations(db: Session, owner_account_id: Optional[int] = None):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=LOCATION_RETENTION_DAYS)
+    q = db.query(models.SalesRepLocation).filter(
+        models.SalesRepLocation.recorded_at < cutoff
+    )
+    if owner_account_id is not None:
+        q = q.filter(models.SalesRepLocation.owner_account_id == owner_account_id)
+    q.delete(synchronize_session=False)
+
+
+def get_rep_location_config(db: Session, user: models.User) -> schemas.RepLocationConfig:
+    if user.role != "rep" or not user.sales_rep_id or not user.account_id:
+        raise AppError("Sales rep login required")
+    account = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    enabled = bool(account and getattr(account, "track_salesrep_location", False))
+    return schemas.RepLocationConfig(
+        enabled=enabled,
+        interval_sec=120,
+        retention_days=LOCATION_RETENTION_DAYS,
+    )
+
+
+def record_rep_location(
+    db: Session, user: models.User, data: schemas.RepLocationPing
+) -> Optional[models.SalesRepLocation]:
+    if user.role != "rep" or not user.sales_rep_id or not user.account_id:
+        raise AppError("Sales rep login required")
+    account = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not account or not getattr(account, "track_salesrep_location", False):
+        return None  # tracking off — silently ignore
+
+    rep = (
+        db.query(models.SalesRep)
+        .filter(
+            models.SalesRep.id == user.sales_rep_id,
+            models.SalesRep.owner_account_id == account.id,
+        )
+        .first()
+    )
+    if not rep:
+        raise AppError("Sales rep not found")
+
+    _prune_old_locations(db, account.id)
+
+    now = datetime.now(timezone.utc)
+    recorded = data.recorded_at or now
+    if recorded.tzinfo is None:
+        recorded = recorded.replace(tzinfo=timezone.utc)
+
+    last = (
+        db.query(models.SalesRepLocation)
+        .filter(models.SalesRepLocation.sales_rep_id == rep.id)
+        .order_by(models.SalesRepLocation.recorded_at.desc())
+        .first()
+    )
+    if last and last.recorded_at:
+        last_at = last.recorded_at
+        if last_at.tzinfo is None:
+            last_at = last_at.replace(tzinfo=timezone.utc)
+        if (recorded - last_at).total_seconds() < LOCATION_MIN_INTERVAL_SEC:
+            return last  # rate limit — keep last point
+
+    ping = models.SalesRepLocation(
+        owner_account_id=account.id,
+        sales_rep_id=rep.id,
+        latitude=float(data.latitude),
+        longitude=float(data.longitude),
+        accuracy_m=float(data.accuracy_m) if data.accuracy_m is not None else None,
+        recorded_at=recorded,
+    )
+    db.add(ping)
+    db.commit()
+    db.refresh(ping)
+    return ping
+
+
+def get_sales_rep_locations_latest(
+    db: Session, account: models.Account
+) -> List[schemas.SalesRepLocationLatest]:
+    if account.account_type not in ("distributor", "sub_distributor", "stockist"):
+        raise AppError("Only distributors can view sales rep locations")
+    _prune_old_locations(db, account.id)
+
+    reps = (
+        db.query(models.SalesRep)
+        .filter(models.SalesRep.owner_account_id == account.id)
+        .order_by(models.SalesRep.name)
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    rows: List[schemas.SalesRepLocationLatest] = []
+    for rep in reps:
+        last = (
+            db.query(models.SalesRepLocation)
+            .filter(models.SalesRepLocation.sales_rep_id == rep.id)
+            .order_by(models.SalesRepLocation.recorded_at.desc())
+            .first()
+        )
+        age = None
+        if last and last.recorded_at:
+            at = last.recorded_at
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=timezone.utc)
+            age = max(int((now - at).total_seconds() // 60), 0)
+        rows.append(
+            schemas.SalesRepLocationLatest(
+                sales_rep_id=rep.id,
+                sales_rep_name=rep.name,
+                phone=rep.phone or "",
+                latitude=last.latitude if last else None,
+                longitude=last.longitude if last else None,
+                accuracy_m=last.accuracy_m if last else None,
+                recorded_at=last.recorded_at if last else None,
+                age_minutes=age,
+            )
+        )
+    return rows
+
+
+def get_sales_rep_location_trail(
+    db: Session, account: models.Account, rep_id: int, limit: int = 200
+) -> List[schemas.SalesRepLocationPoint]:
+    if account.account_type not in ("distributor", "sub_distributor", "stockist"):
+        raise AppError("Only distributors can view sales rep locations")
+    _prune_old_locations(db, account.id)
+
+    rep = (
+        db.query(models.SalesRep)
+        .filter(
+            models.SalesRep.id == rep_id,
+            models.SalesRep.owner_account_id == account.id,
+        )
+        .first()
+    )
+    if not rep:
+        raise AppError("Sales rep not found")
+
+    limit = max(1, min(int(limit or 200), 500))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=LOCATION_RETENTION_DAYS)
+    points = (
+        db.query(models.SalesRepLocation)
+        .filter(
+            models.SalesRepLocation.sales_rep_id == rep.id,
+            models.SalesRepLocation.recorded_at >= cutoff,
+        )
+        .order_by(models.SalesRepLocation.recorded_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        schemas.SalesRepLocationPoint(
+            id=p.id,
+            sales_rep_id=p.sales_rep_id,
+            latitude=p.latitude,
+            longitude=p.longitude,
+            accuracy_m=p.accuracy_m,
+            recorded_at=p.recorded_at,
+        )
+        for p in points
+    ]
+
+
 # ---------- Parties (scoped) ----------
 def get_parties(
     db: Session,
     account: models.Account,
     search: Optional[str] = None,
     location: Optional[str] = None,
+    limit: int = 100,
 ):
-    q = db.query(models.Party).filter(models.Party.owner_account_id == account.id)
-    if search:
-        term = f"%{search}%"
+    from sqlalchemy.orm import selectinload
+
+    limit = max(1, min(int(limit or 100), 300))
+    q = (
+        db.query(models.Party)
+        .options(
+            selectinload(models.Party.linked_account),
+            selectinload(models.Party.sales_rep),
+        )
+        .filter(models.Party.owner_account_id == account.id)
+    )
+    term = (search or "").strip()
+    if term:
+        if len(term) <= 2:
+            like = f"{term}%"
+        else:
+            like = f"%{term}%"
         q = q.filter(
             or_(
-                models.Party.name.ilike(term),
-                models.Party.code.ilike(term),
-                models.Party.mobile.ilike(term),
+                models.Party.name.ilike(like),
+                models.Party.code.ilike(like),
+                models.Party.mobile.ilike(like),
+                models.Party.area.ilike(like),
             )
         )
     if location:
         loc = f"%{location}%"
         q = q.filter(or_(models.Party.area.ilike(loc), models.Party.city.ilike(loc)))
-    return q.order_by(models.Party.name).all()
+    return q.order_by(models.Party.name).limit(limit).all()
 
 
 def get_party(db: Session, account: models.Account, party_id: int):
+    from sqlalchemy.orm import selectinload
+
     return (
         db.query(models.Party)
+        .options(
+            selectinload(models.Party.linked_account),
+            selectinload(models.Party.sales_rep),
+        )
         .filter(
             models.Party.id == party_id,
             models.Party.owner_account_id == account.id,
@@ -781,33 +976,70 @@ def search_products_across_suppliers(
 
 
 def get_rep_customers(
-    db: Session, user: models.User, search: Optional[str] = None
+    db: Session,
+    user: models.User,
+    search: Optional[str] = None,
+    limit: int = 100,
 ):
-    """All parties in the distributor party master (not only assigned)."""
+    """Parties in the distributor party master (paginated / searchable)."""
     if user.role != "rep" or not user.sales_rep_id:
         raise AppError("Sales rep login required")
-    q = db.query(models.Party).filter(
-        models.Party.owner_account_id == user.account_id,
-        models.Party.party_type == "customer",
+    from sqlalchemy.orm import noload
+
+    limit = max(1, min(int(limit or 100), 200))
+    q = (
+        db.query(models.Party)
+        .options(
+            noload(models.Party.linked_account),
+            noload(models.Party.sales_rep),
+        )
+        .filter(
+            models.Party.owner_account_id == user.account_id,
+            models.Party.party_type == "customer",
+        )
     )
-    if search:
-        term = f"%{search.strip()}%"
+    term = (search or "").strip()
+    if term:
+        if len(term) <= 2:
+            like = f"{term}%"
+        else:
+            like = f"%{term}%"
         q = q.filter(
             or_(
-                models.Party.name.ilike(term),
-                models.Party.code.ilike(term),
-                models.Party.area.ilike(term),
-                models.Party.city.ilike(term),
-                models.Party.mobile.ilike(term),
+                models.Party.name.ilike(like),
+                models.Party.code.ilike(like),
+                models.Party.area.ilike(like),
+                models.Party.city.ilike(like),
+                models.Party.mobile.ilike(like),
             )
         )
-    return q.order_by(models.Party.name).all()
+    return q.order_by(models.Party.name).limit(limit).all()
+
+
+def get_rep_customer(db: Session, user: models.User, party_id: int):
+    if user.role != "rep" or not user.sales_rep_id:
+        raise AppError("Sales rep login required")
+    from sqlalchemy.orm import noload
+
+    return (
+        db.query(models.Party)
+        .options(
+            noload(models.Party.linked_account),
+            noload(models.Party.sales_rep),
+        )
+        .filter(
+            models.Party.id == party_id,
+            models.Party.owner_account_id == user.account_id,
+            models.Party.party_type == "customer",
+        )
+        .first()
+    )
 
 
 def get_rep_stock(
     db: Session, user: models.User, search: Optional[str] = None, limit: int = 100
 ):
-    """Distributor stock list for sales rep (honors display_stock_to_salesrep)."""
+    """Distributor stock list for sales rep (this distributor only)."""
     if user.role != "rep" or not user.account_id:
         raise AppError("Sales rep login required")
     distributor = (
@@ -818,52 +1050,69 @@ def get_rep_stock(
 
     settings = get_distributor_settings(distributor)
     hide_hold = bool(distributor.hide_hold_products_from_salesrep)
-    limit = max(1, min(int(limit or 100), 300))
+    term = (search or "").strip()
+    # Without search, keep the default list small so first open stays fast
+    default_cap = 80 if not term else 200
+    limit = max(1, min(int(limit or default_cap), default_cap))
 
-    q = db.query(models.Product).filter(
-        models.Product.owner_account_id == distributor.id
+    stock_sub = (
+        db.query(
+            models.StockBatch.product_id.label("product_id"),
+            func.coalesce(func.sum(models.StockBatch.available_qty), 0).label("qty"),
+            func.count(models.StockBatch.id).label("batch_count"),
+            func.max(models.StockBatch.scheme).label("scheme"),
+        )
+        .filter(
+            models.StockBatch.owner_account_id == distributor.id,
+            models.StockBatch.show_to_customer.is_(True),
+        )
+        .group_by(models.StockBatch.product_id)
+        .subquery()
+    )
+
+    q = (
+        db.query(models.Product, stock_sub.c.qty, stock_sub.c.batch_count, stock_sub.c.scheme)
+        .outerjoin(stock_sub, stock_sub.c.product_id == models.Product.id)
+        .filter(models.Product.owner_account_id == distributor.id)
     )
     if hide_hold:
         q = q.filter(models.Product.is_on_hold.isnot(True))
-    if search and search.strip():
-        term = f"%{search.strip()}%"
+    if term:
+        if len(term) <= 2:
+            like = f"{term}%"
+        else:
+            like = f"%{term}%"
         q = q.filter(
             or_(
-                models.Product.name.ilike(term),
-                models.Product.product_code.ilike(term),
-                models.Product.manufacturer.ilike(term),
+                models.Product.name.ilike(like),
+                models.Product.product_code.ilike(like),
+                models.Product.manufacturer.ilike(like),
             )
         )
-    products = q.order_by(models.Product.name).limit(limit).all()
+
+    rows_db = q.order_by(models.Product.name).limit(limit).all()
     rows = []
-    for p in products:
-        _attach_stock(p)
-        batches = [b for b in p.stock_batches if b.show_to_customer]
-        if not batches and not distributor.allow_order_no_stock:
-            # still show product with zero if they want visibility — include zero stock products
-            pass
-        total = sum(b.available_qty for b in batches)
+    for p, qty, batch_count, scheme in rows_db:
+        total = int(qty or 0)
+        p.total_stock = total
         if not settings.display_stock_to_salesrep:
-            qty = None
+            stock_qty = None
             stock_hidden = True
         else:
-            qty = total
+            stock_qty = total
             stock_hidden = False
-        scheme = ""
-        if not settings.hide_scheme_from_salesrep:
-            for b in batches:
-                if (b.scheme or "").strip():
-                    scheme = b.scheme
-                    break
+        show_scheme = ""
+        if not settings.hide_scheme_from_salesrep and scheme:
+            show_scheme = scheme
         rows.append(
             {
                 "product": p,
-                "available_qty": qty,
+                "available_qty": stock_qty,
                 "stock_hidden": stock_hidden,
-                "scheme": scheme,
+                "scheme": show_scheme,
                 "mrp": p.mrp,
                 "ptr_rate": p.ptr_rate,
-                "batch_count": len(batches),
+                "batch_count": int(batch_count or 0),
             }
         )
     return rows, settings
@@ -887,12 +1136,16 @@ def get_rep_catalog(
     db: Session,
     user: models.User,
     search: Optional[str] = None,
-    limit: int = 40,
+    limit: int = 20,
     in_stock_only: bool = False,
     first_word_exact: bool = False,
     scheme_only: bool = False,
 ):
-    """Sales rep browses their own distributor stock (not other suppliers)."""
+    """Fast search of THIS distributor's products only (Vajra stock for a Vajra rep).
+
+    Requires at least 2 characters. Prefix match + SQL stock sum so large catalogs
+    stay responsive as product count grows.
+    """
     if user.role != "rep" or not user.sales_rep_id or not user.account_id:
         raise AppError("Sales rep login required")
     distributor = (
@@ -901,20 +1154,35 @@ def get_rep_catalog(
     if not distributor:
         raise AppError("Distributor account not found")
 
+    settings = get_distributor_settings(distributor)
     term = (search or "").strip()
-    if not term:
-        return [], get_distributor_settings(distributor)
+    if len(term) < 2:
+        return [], settings
 
-    allow_no_stock = bool(distributor.allow_order_no_stock)
-    include_nil = not in_stock_only
-    limit = max(1, min(int(limit or 40), 100))
+    limit = max(1, min(int(limit or 20), 40))
     hide_hold = bool(distributor.hide_hold_products_from_salesrep)
 
-    q = db.query(models.Product).filter(
-        models.Product.owner_account_id == distributor.id,
+    stock_sub = (
+        db.query(
+            models.StockBatch.product_id.label("product_id"),
+            func.coalesce(func.sum(models.StockBatch.available_qty), 0).label("qty"),
+        )
+        .filter(
+            models.StockBatch.owner_account_id == distributor.id,
+            models.StockBatch.show_to_customer.is_(True),
+        )
+        .group_by(models.StockBatch.product_id)
+        .subquery()
+    )
+
+    q = (
+        db.query(models.Product, stock_sub.c.qty)
+        .outerjoin(stock_sub, stock_sub.c.product_id == models.Product.id)
+        .filter(models.Product.owner_account_id == distributor.id)
     )
     if hide_hold:
         q = q.filter(models.Product.is_on_hold.isnot(True))
+
     if first_word_exact:
         first = term.split()[0]
         q = q.filter(
@@ -924,34 +1192,75 @@ def get_rep_catalog(
                 models.Product.product_code.ilike(first),
             )
         )
-    else:
-        like = f"%{term}%"
+    elif len(term) == 2:
+        # Prefix-only for short terms (index-friendly vs %xx%)
+        pref = f"{term}%"
         q = q.filter(
             or_(
-                models.Product.name.ilike(like),
-                models.Product.product_code.ilike(like),
-                models.Product.manufacturer.ilike(like),
+                models.Product.name.ilike(pref),
+                models.Product.product_code.ilike(pref),
+            )
+        )
+    else:
+        pref = f"{term}%"
+        contains = f"%{term}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(pref),
+                models.Product.product_code.ilike(pref),
+                models.Product.name.ilike(contains),
+                models.Product.product_code.ilike(contains),
             )
         )
 
-    products = q.order_by(models.Product.name).limit(limit * 3).all()
-    settings = get_distributor_settings(distributor)
+    if in_stock_only:
+        q = q.filter(func.coalesce(stock_sub.c.qty, 0) > 0)
+
+    if scheme_only:
+        scheme_exists = (
+            db.query(models.StockBatch.id)
+            .filter(
+                models.StockBatch.product_id == models.Product.id,
+                models.StockBatch.owner_account_id == distributor.id,
+                models.StockBatch.show_to_customer.is_(True),
+                models.StockBatch.scheme.isnot(None),
+                models.StockBatch.scheme != "",
+            )
+            .exists()
+        )
+        q = q.filter(scheme_exists)
+
+    rows = (
+        q.order_by(
+            models.Product.name.ilike(f"{term}%").desc(),
+            models.Product.name,
+        )
+        .limit(limit)
+        .all()
+    )
+
     result = []
-    for p in products:
-        visible = [
-            b
-            for b in p.stock_batches
-            if b.show_to_customer
-            and (b.available_qty > 0 or include_nil or allow_no_stock)
-            and (not scheme_only or (b.scheme or "").strip())
-        ]
-        if in_stock_only:
-            visible = [b for b in visible if b.available_qty > 0]
-        _attach_stock(p)
-        if visible or ((include_nil or allow_no_stock) and not scheme_only):
-            result.append({"product": p, "batches": visible if visible else []})
-        if len(result) >= limit:
-            break
+    for p, qty in rows:
+        avail = int(qty or 0)
+        p.total_stock = avail
+        # One summarized batch dict — avoids loading every ERP batch row
+        batch = {
+            "id": 0,
+            "product_id": p.id,
+            "owner_account_id": distributor.id,
+            "batch_no": "",
+            "expiry_date": None,
+            "available_qty": avail,
+            "scheme": "",
+            "mrp": float(p.mrp or 0),
+            "ptr_rate": float(p.ptr_rate or 0),
+            "pts_rate": float(p.pts_rate or 0),
+            "show_to_customer": True,
+            "created_at": p.created_at,
+            "stock_hidden": False,
+            "scheme_hidden": False,
+        }
+        result.append({"product": p, "batches": [batch], "available_qty": avail})
     return result, settings
 
 
@@ -1592,7 +1901,7 @@ def get_outstanding(
             amount=round(b.amount or 0.0, 2),
             paid=round(b.paid or 0.0, 2),
             balance=round(b.balance or 0.0, 2),
-            age=b.age or 0,
+            age=_bill_age(b.invoice_date),
             discount=round(b.discount or 0.0, 2),
         )
         for b in bills
@@ -1644,11 +1953,12 @@ def _resolve_party_ref(
     return by_name.id if by_name else None
 
 
-def _bill_age(invoice_date: Optional[date], age: Optional[int]) -> int:
-    if age is not None:
-        return age
+def _bill_age(invoice_date: Optional[date], age: Optional[int] = None) -> int:
+    """Days since invoice date (auto). Uploaded age is ignored when date exists."""
     if invoice_date:
         return max((date.today() - invoice_date).days, 0)
+    if age is not None:
+        return max(int(age), 0)
     return 0
 
 

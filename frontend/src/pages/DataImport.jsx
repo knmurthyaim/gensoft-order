@@ -74,7 +74,7 @@ export default function DataImport() {
       />
       <UploadSection
         title="Outstanding bills"
-        description="Invoice-wise outstanding: party id, invoice no, date, amount, paid, balance, age, discount."
+        description="Invoice-wise outstanding: party id, invoice no, date, amount, paid, balance, discount. Age is calculated automatically from invoice date."
         api={outstanding}
         resultLabel="Bills"
       />

@@ -43,6 +43,7 @@ def migrate_db():
         ("accounts", "hide_scheme_from_parties", "BOOLEAN", "1", "true"),
         ("accounts", "hide_scheme_from_salesrep", "BOOLEAN", "1", "true"),
         ("accounts", "hide_hold_products_from_salesrep", "BOOLEAN", "0", "false"),
+        ("accounts", "track_salesrep_location", "BOOLEAN", "0", "false"),
         ("accounts", "minimum_order_value", "REAL", "0", "0"),
         ("accounts", "no_order_from", "TIMESTAMP", None, None),
         ("accounts", "no_order_to", "TIMESTAMP", None, None),
@@ -96,6 +97,24 @@ def migrate_db():
                 )
         except Exception:
             pass
+
+        # Speed up rep/marketplace catalog filters as product volume grows
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_products_owner_account_id ON products (owner_account_id)",
+            "CREATE INDEX IF NOT EXISTS ix_products_owner_name ON products (owner_account_id, name)",
+            "CREATE INDEX IF NOT EXISTS ix_stock_batches_owner ON stock_batches (owner_account_id)",
+            "CREATE INDEX IF NOT EXISTS ix_stock_batches_product ON stock_batches (product_id)",
+            "CREATE INDEX IF NOT EXISTS ix_stock_batches_owner_product ON stock_batches (owner_account_id, product_id)",
+            "CREATE INDEX IF NOT EXISTS ix_parties_owner_account_id ON parties (owner_account_id)",
+            "CREATE INDEX IF NOT EXISTS ix_parties_owner_name ON parties (owner_account_id, name)",
+            "CREATE INDEX IF NOT EXISTS ix_parties_owner_type ON parties (owner_account_id, party_type)",
+            "CREATE INDEX IF NOT EXISTS ix_srl_owner_recorded ON sales_rep_locations (owner_account_id, recorded_at)",
+            "CREATE INDEX IF NOT EXISTS ix_srl_rep_recorded ON sales_rep_locations (sales_rep_id, recorded_at)",
+        ):
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass
 
 
 def get_db():

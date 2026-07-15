@@ -126,7 +126,15 @@ export const products = {
   ...crud("products"),
   ...makeUploadApi("/products", "gensoft_products_stock_template.xlsx"),
 };
-export const salesReps = crud("sales-reps");
+export const salesReps = {
+  ...crud("sales-reps"),
+  locationsLatest: () =>
+    api.get("/sales-reps/locations/latest").then((r) => r.data),
+  locationTrail: (repId, params = {}) =>
+    api
+      .get(`/sales-reps/${repId}/locations`, { params })
+      .then((r) => r.data),
+};
 export const batches = crud("batches");
 
 export const parties = {
@@ -165,12 +173,18 @@ export const marketplace = {
 export const repApi = {
   customers: (params) =>
     api.get("/rep/customers", { params }).then((r) => r.data),
+  customer: (partyId) =>
+    api.get(`/rep/customers/${partyId}`).then((r) => r.data),
   catalog: (params) =>
     api.get("/rep/catalog", { params }).then((r) => r.data),
   stock: (params) =>
     api.get("/rep/stock", { params }).then((r) => r.data),
   outstanding: (params) =>
     api.get("/rep/outstanding", { params }).then((r) => r.data),
+  locationConfig: () =>
+    api.get("/rep/location-config").then((r) => r.data),
+  postLocation: (data) =>
+    api.post("/rep/location", data).then((r) => r.data),
   createOrder: (data) =>
     api.post("/rep/orders", data).then((r) => r.data),
   orders: () => api.get("/rep/orders").then((r) => r.data),

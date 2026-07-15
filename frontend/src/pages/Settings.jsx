@@ -67,6 +67,19 @@ const SECTIONS = [
     ],
   },
   {
+    title: "SALES REP TRACKING",
+    rows: [
+      {
+        key: "track_salesrep_location",
+        label: "TRACK SALES REP LOCATION",
+        yesHelp:
+          "Yes: Rep app shares GPS while logged in. Visible only to you for 7 days.",
+        noHelp:
+          "No: Location is not collected from sales reps.",
+      },
+    ],
+  },
+  {
     title: "ORDER SETTINGS",
     rows: [
       {
@@ -97,6 +110,7 @@ const emptyValues = {
   hide_scheme_from_parties: true,
   hide_scheme_from_salesrep: true,
   hide_hold_products_from_salesrep: false,
+  track_salesrep_location: false,
   minimum_order_value: 0,
   no_order_from: null,
   no_order_to: null,
