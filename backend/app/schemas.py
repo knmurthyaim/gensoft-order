@@ -431,7 +431,7 @@ class RepLocationBatchResult(BaseModel):
 
 class RepLocationConfig(BaseModel):
     enabled: bool = False
-    interval_sec: int = 60
+    interval_sec: int = 30
     retention_days: int = 7
     min_move_meters: int = 50
 

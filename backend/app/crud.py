@@ -339,7 +339,7 @@ def delete_sales_rep(db: Session, account, rep_id) -> bool:
 
 
 LOCATION_RETENTION_DAYS = 7
-LOCATION_INTERVAL_SEC = 60  # check GPS every 1 minute
+LOCATION_INTERVAL_SEC = 30  # check GPS every 30 seconds
 LOCATION_MIN_MOVE_METERS = 50  # only store if moved ~50m from last point
 
 

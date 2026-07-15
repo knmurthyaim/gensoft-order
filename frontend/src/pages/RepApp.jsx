@@ -571,20 +571,15 @@ export function RepShell({ children }) {
   const { user, account, salesRep, logout } = useAuth();
   // off | sharing | pending | denied | error
   const [locStatus, setLocStatus] = useState("");
-  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     let timer = null;
     let wakeLock = null;
-    let intervalMs = 60 * 1000;
+    let intervalMs = 30 * 1000;
     let minMoveMeters = 50;
     let lastCaptureMs = 0;
     const LAST_KEY = "gensoft_rep_last_loc_ms";
-
-    const refreshPending = () => {
-      if (!cancelled) setPendingCount(queueCount());
-    };
 
     const releaseWake = async () => {
       try {
@@ -612,16 +607,14 @@ export function RepShell({ children }) {
       try {
         const result = await flushLocationQueue(repApi.postLocationBatch);
         if (cancelled) return;
-        refreshPending();
         if (result.disabled) {
           setLocStatus("off");
           return;
         }
         if (result.remaining > 0) setLocStatus("pending");
-        else if (result.synced > 0 || queueCount() === 0) setLocStatus("sharing");
+        else setLocStatus("sharing");
       } catch {
         if (!cancelled) {
-          refreshPending();
           setLocStatus(queueCount() > 0 ? "pending" : "error");
         }
       }
@@ -655,7 +648,6 @@ export function RepShell({ children }) {
             },
             minMoveMeters
           );
-          refreshPending();
           setLocStatus(navigator.onLine ? "sharing" : "pending");
           syncToCloud();
         },
@@ -669,7 +661,7 @@ export function RepShell({ children }) {
 
     const tick = () => {
       const now = Date.now();
-      if (now - lastCaptureMs < Math.min(intervalMs * 0.8, 45 * 1000)) {
+      if (now - lastCaptureMs < Math.min(intervalMs * 0.8, 20 * 1000)) {
         syncToCloud();
         return;
       }
@@ -677,11 +669,10 @@ export function RepShell({ children }) {
     };
 
     const startTracking = async (cfg) => {
-      intervalMs = Math.max(30, Number(cfg?.interval_sec) || 60) * 1000;
+      intervalMs = Math.max(15, Number(cfg?.interval_sec) || 30) * 1000;
       minMoveMeters = Math.max(10, Number(cfg?.min_move_meters) || 50);
       setLocStatus(navigator.onLine ? "sharing" : "pending");
       await requestWake();
-      refreshPending();
       await syncToCloud();
       captureLocal();
       if (timer) clearInterval(timer);
@@ -771,16 +762,6 @@ export function RepShell({ children }) {
           <div className="zennx-logo">GenSoft</div>
           <div className="rep-header-sub">
             {salesRep?.name || user?.name} · {account?.name}
-            {locStatus === "sharing" && (
-              <span className="rep-loc-badge"> · Loc 1 min / 50m+</span>
-            )}
-            {locStatus === "pending" && (
-              <span className="rep-loc-badge warn">
-                {" "}
-                · Saved on phone
-                {pendingCount > 0 ? ` (${pendingCount})` : ""} — will sync
-              </span>
-            )}
             {locStatus === "denied" && (
               <span className="rep-loc-badge warn"> · Location blocked</span>
             )}

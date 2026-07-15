@@ -1,10 +1,10 @@
 /** Local GPS queue on the rep phone — sync to cloud when online. */
 
 const QUEUE_KEY = "gensoft_rep_loc_queue_v1";
-const MAX_POINTS = 10080; // ~7 days @ 1 min max
+const MAX_POINTS = 20160; // ~7 days @ 30 sec max
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_MOVE_METERS = 50;
-const MIN_GAP_MS = 45 * 1000;
+const MIN_GAP_MS = 20 * 1000;
 
 function readQueue() {
   try {

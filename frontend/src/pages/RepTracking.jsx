@@ -258,7 +258,7 @@ export default function RepTracking() {
           <h1 className="page-title">Rep Location</h1>
           <p className="page-sub">
             Select a day to draw that day&apos;s route line on the map (IST).
-            Phone checks every 1 min and saves only moves of 50m+. History
+            Phone checks every 30 seconds and saves only moves of 50m+. History
             7 days. Enable in{" "}
             <Link to="/settings">Settings → Sales Rep Tracking</Link>.
           </p>
