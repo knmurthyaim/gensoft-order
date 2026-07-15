@@ -1,7 +1,7 @@
 /**
  * Native background GPS (Capacitor Android/iOS).
- * Continues while the app is minimized / screen off.
- * Points are saved on the phone and synced to cloud when online.
+ * Uses Capacitor.registerPlugin — the community package is native-only
+ * (no JS main entry), so we must not import it as a module for Vite builds.
  */
 
 let watcherId = null;
@@ -15,6 +15,11 @@ export async function isNativeApp() {
   }
 }
 
+async function getBackgroundGeolocation() {
+  const { registerPlugin } = await import("@capacitor/core");
+  return registerPlugin("BackgroundGeolocation");
+}
+
 /**
  * Start native background geolocation.
  * @param {{ minMoveMeters?: number, onPoint: (p: object) => void, onError?: (e: object) => void }} opts
@@ -23,9 +28,7 @@ export async function startNativeBackgroundTracking(opts) {
   const native = await isNativeApp();
   if (!native) return { started: false, reason: "web" };
 
-  const { BackgroundGeolocation } = await import(
-    "@capacitor-community/background-geolocation"
-  );
+  const BackgroundGeolocation = await getBackgroundGeolocation();
   if (watcherId) {
     try {
       await BackgroundGeolocation.removeWatcher({ id: watcherId });
@@ -56,9 +59,7 @@ export async function startNativeBackgroundTracking(opts) {
         longitude: location.longitude,
         accuracy_m:
           typeof location.accuracy === "number" ? location.accuracy : null,
-        recorded_at: new Date(
-          location.time || Date.now()
-        ).toISOString(),
+        recorded_at: new Date(location.time || Date.now()).toISOString(),
       });
     }
   );
@@ -68,9 +69,7 @@ export async function startNativeBackgroundTracking(opts) {
 export async function stopNativeBackgroundTracking() {
   if (!watcherId) return;
   try {
-    const { BackgroundGeolocation } = await import(
-      "@capacitor-community/background-geolocation"
-    );
+    const BackgroundGeolocation = await getBackgroundGeolocation();
     await BackgroundGeolocation.removeWatcher({ id: watcherId });
   } catch {
     /* ignore */
