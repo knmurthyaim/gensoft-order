@@ -601,6 +601,29 @@ def get_sales_rep_location_trail(
 
 
 # ---------- Parties (scoped) ----------
+def _attach_party_location_meta(db: Session, parties: List[models.Party]):
+    """Fill location_tagged_by_name for API responses (visible to all reps)."""
+    if not parties:
+        return parties
+    rep_ids = {
+        p.location_tagged_by_rep_id
+        for p in parties
+        if getattr(p, "location_tagged_by_rep_id", None)
+    }
+    names = {}
+    if rep_ids:
+        for rep in (
+            db.query(models.SalesRep)
+            .filter(models.SalesRep.id.in_(list(rep_ids)))
+            .all()
+        ):
+            names[rep.id] = rep.name
+    for p in parties:
+        rid = getattr(p, "location_tagged_by_rep_id", None)
+        p.location_tagged_by_name = names.get(rid) if rid else None
+    return parties
+
+
 def get_parties(
     db: Session,
     account: models.Account,
@@ -636,13 +659,14 @@ def get_parties(
     if location:
         loc = f"%{location}%"
         q = q.filter(or_(models.Party.area.ilike(loc), models.Party.city.ilike(loc)))
-    return q.order_by(models.Party.name).limit(limit).all()
+    rows = q.order_by(models.Party.name).limit(limit).all()
+    return _attach_party_location_meta(db, rows)
 
 
 def get_party(db: Session, account: models.Account, party_id: int):
     from sqlalchemy.orm import selectinload
 
-    return (
+    obj = (
         db.query(models.Party)
         .options(
             selectinload(models.Party.linked_account),
@@ -654,6 +678,26 @@ def get_party(db: Session, account: models.Account, party_id: int):
         )
         .first()
     )
+    if obj:
+        _attach_party_location_meta(db, [obj])
+    return obj
+
+
+def clear_party_location(db: Session, account: models.Account, party_id: int):
+    """Only distributor / stockist can remove a tagged customer shop location."""
+    if account.account_type not in ("distributor", "sub_distributor", "stockist"):
+        raise AppError("Only stockist/distributor can delete tagged party location")
+    obj = get_party(db, account, party_id)
+    if not obj:
+        return None
+    obj.location_lat = None
+    obj.location_lng = None
+    obj.location_tagged_at = None
+    obj.location_tagged_by_rep_id = None
+    db.commit()
+    db.refresh(obj)
+    _attach_party_location_meta(db, [obj])
+    return obj
 
 
 def create_party(db: Session, account: models.Account, data: schemas.PartyCreate):
@@ -1105,7 +1149,8 @@ def get_rep_customers(
                 models.Party.mobile.ilike(like),
             )
         )
-    return q.order_by(models.Party.name).limit(limit).all()
+    rows = q.order_by(models.Party.name).limit(limit).all()
+    return _attach_party_location_meta(db, rows)
 
 
 def get_rep_customer(db: Session, user: models.User, party_id: int):
@@ -1113,7 +1158,7 @@ def get_rep_customer(db: Session, user: models.User, party_id: int):
         raise AppError("Sales rep login required")
     from sqlalchemy.orm import noload
 
-    return (
+    obj = (
         db.query(models.Party)
         .options(
             noload(models.Party.linked_account),
@@ -1126,6 +1171,34 @@ def get_rep_customer(db: Session, user: models.User, party_id: int):
         )
         .first()
     )
+    if obj:
+        _attach_party_location_meta(db, [obj])
+    return obj
+
+
+def tag_rep_customer_location(
+    db: Session, user: models.User, party_id: int, data: schemas.PartyLocationTag
+):
+    """Sales rep tags shop GPS. Shared with all reps of same distributor.
+    Once tagged, only stockist/distributor can clear it (reps cannot overwrite).
+    """
+    if user.role != "rep" or not user.sales_rep_id or not user.account_id:
+        raise AppError("Sales rep login required")
+    party = get_rep_customer(db, user, party_id)
+    if not party:
+        raise AppError("Party not found")
+    if party.location_lat is not None and party.location_lng is not None:
+        raise AppError(
+            "Location already tagged. Ask stockist/distributor to delete it first."
+        )
+    party.location_lat = float(data.latitude)
+    party.location_lng = float(data.longitude)
+    party.location_tagged_at = datetime.now(timezone.utc)
+    party.location_tagged_by_rep_id = user.sales_rep_id
+    db.commit()
+    db.refresh(party)
+    _attach_party_location_meta(db, [party])
+    return party
 
 
 def get_rep_stock(

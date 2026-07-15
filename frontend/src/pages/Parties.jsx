@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "../components/Modal.jsx";
 import { getDirectory, parties as partiesApi, salesReps as repApi } from "../api";
+import { useAuth } from "../AuthContext.jsx";
 import { inr } from "../format";
 
 const empty = {
@@ -17,6 +18,11 @@ const empty = {
 };
 
 export default function Parties() {
+  const { account } = useAuth();
+  const canClearLocation =
+    account?.account_type === "distributor" ||
+    account?.account_type === "sub_distributor" ||
+    account?.account_type === "stockist";
   const [rows, setRows] = useState([]);
   const [reps, setReps] = useState([]);
   const [search, setSearch] = useState("");
@@ -101,6 +107,24 @@ export default function Parties() {
     load(debounced);
   };
 
+  const clearLocation = async (p) => {
+    if (
+      !confirm(
+        `Remove tagged location for "${p.name}"? Sales reps can tag again after this.`
+      )
+    )
+      return;
+    try {
+      await partiesApi.clearLocation(p.id);
+      load(debounced);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not remove location.");
+    }
+  };
+
+  const mapsUrl = (lat, lng) =>
+    `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+
   const openLink = (p) => {
     setLinkRow(p);
     setDirSearch("");
@@ -126,8 +150,8 @@ export default function Parties() {
         <div>
           <h1 className="page-title">Parties</h1>
           <p className="page-sub">
-            Your own party master. Link a party to its GenSoft account to enable
-            connected ordering.
+            Your own party master. Sales reps can tag shop GPS (shared for all
+            reps). Only stockist/distributor can remove a tagged location.
           </p>
         </div>
         <button className="btn" onClick={openCreate}>
@@ -166,6 +190,7 @@ export default function Parties() {
               <th>Area</th>
               <th>DL No</th>
               <th>Rep</th>
+              <th>Shop location</th>
               <th>Outstanding</th>
               <th>GenSoft Link</th>
               <th></th>
@@ -183,6 +208,34 @@ export default function Parties() {
                 <td>{p.area || "—"}</td>
                 <td>{p.dl_no || "—"}</td>
                 <td>{p.sales_rep_id ? repMap[p.sales_rep_id] : "—"}</td>
+                <td>
+                  {p.location_lat != null && p.location_lng != null ? (
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <span className="status-pill accepted">Tagged</span>
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        by {p.location_tagged_by_name || "rep"}
+                      </span>
+                      <a
+                        href={mapsUrl(p.location_lat, p.location_lng)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View map
+                      </a>
+                      {canClearLocation && (
+                        <button
+                          type="button"
+                          className="btn danger sm"
+                          onClick={() => clearLocation(p)}
+                        >
+                          Remove tag
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="muted">Not tagged</span>
+                  )}
+                </td>
                 <td className={p.outstanding_balance > 0 ? "low-stock" : ""}>
                   {inr(p.outstanding_balance)}
                 </td>
@@ -212,7 +265,7 @@ export default function Parties() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="empty">
+                <td colSpan={10} className="empty">
                   {debounced ? "No parties match your search." : "No parties found."}
                 </td>
               </tr>

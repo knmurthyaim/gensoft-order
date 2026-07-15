@@ -56,6 +56,21 @@ def get_customer(
     return party
 
 
+@router.post("/customers/{party_id}/location", response_model=schemas.Party)
+def tag_customer_location(
+    party_id: int,
+    data: schemas.PartyLocationTag,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Tag shop GPS for a customer. Visible to all reps of this distributor."""
+    _require_rep(user)
+    try:
+        return crud.tag_rep_customer_location(db, user, party_id, data)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/stock")
 def list_stock(
     search: Optional[str] = None,

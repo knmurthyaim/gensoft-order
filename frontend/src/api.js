@@ -143,6 +143,8 @@ export const parties = {
     api
       .patch(`/parties/${id}/link`, { linked_account_id: linkedAccountId })
       .then((r) => r.data),
+  clearLocation: (id) =>
+    api.delete(`/parties/${id}/location`).then((r) => r.data),
   ...makeUploadApi("/parties", "gensoft_customers_template.xlsx"),
 };
 
@@ -175,6 +177,8 @@ export const repApi = {
     api.get("/rep/customers", { params }).then((r) => r.data),
   customer: (partyId) =>
     api.get(`/rep/customers/${partyId}`).then((r) => r.data),
+  tagCustomerLocation: (partyId, data) =>
+    api.post(`/rep/customers/${partyId}/location`, data).then((r) => r.data),
   catalog: (params) =>
     api.get("/rep/catalog", { params }).then((r) => r.data),
   stock: (params) =>

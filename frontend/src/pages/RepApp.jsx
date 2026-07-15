@@ -35,13 +35,9 @@ export function RepCustomers() {
   const [debounced, setDebounced] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [taggingId, setTaggingId] = useState(null);
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 300);
-    return () => clearTimeout(t);
-  }, [q]);
-
-  useEffect(() => {
+  const reload = () => {
     setLoading(true);
     setError("");
     repApi
@@ -53,14 +49,64 @@ export function RepCustomers() {
       .then(setRows)
       .catch((e) => setError(e.response?.data?.detail || "Failed to load parties"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    reload();
   }, [debounced]);
+
+  const mapsUrl = (lat, lng) =>
+    `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+
+  const tagLocation = (p, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!navigator.geolocation) {
+      setError("Location not supported on this device.");
+      return;
+    }
+    setTaggingId(p.id);
+    setError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        repApi
+          .tagCustomerLocation(p.id, {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy_m:
+              typeof pos.coords.accuracy === "number"
+                ? pos.coords.accuracy
+                : null,
+          })
+          .then((updated) => {
+            setRows((list) =>
+              list.map((row) => (row.id === updated.id ? updated : row))
+            );
+          })
+          .catch((err) =>
+            setError(err.response?.data?.detail || "Could not tag location")
+          )
+          .finally(() => setTaggingId(null));
+      },
+      () => {
+        setError("Allow location permission to tag this customer.");
+        setTaggingId(null);
+      },
+      { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 }
+    );
+  };
 
   return (
     <div className="rep-page">
       <h1 className="page-title">Parties</h1>
       <p className="page-sub">
-        Search your distributor party master, then place an order. Your name is
-        saved on the order.
+        Place orders and tag shop location. Tagged locations are shared with all
+        sales reps of your distributor. Only stockist can delete a tag.
       </p>
       {error && <div className="error-banner">{error}</div>}
       <input
@@ -78,17 +124,48 @@ export function RepCustomers() {
             : `Showing first ${rows.length} parties — type to search all`}
       </p>
       <div className="rep-customer-list">
-        {rows.map((p) => (
-          <Link key={p.id} to={`/rep/order/${p.id}`} className="rep-customer-card">
-            <strong>{p.name}</strong>
-            <span className="muted">
-              {p.code ? `${p.code} · ` : ""}
-              {[p.area, p.city].filter(Boolean).join(", ") || "—"}
-              {p.mobile ? ` · ${p.mobile}` : ""}
-            </span>
-            <span className="rep-order-cta">Place order →</span>
-          </Link>
-        ))}
+        {rows.map((p) => {
+          const tagged = p.location_lat != null && p.location_lng != null;
+          return (
+            <div key={p.id} className="rep-customer-card">
+              <strong>{p.name}</strong>
+              <span className="muted">
+                {p.code ? `${p.code} · ` : ""}
+                {[p.area, p.city].filter(Boolean).join(", ") || "—"}
+                {p.mobile ? ` · ${p.mobile}` : ""}
+              </span>
+              {tagged ? (
+                <div className="rep-loc-tagged">
+                  <span className="status-pill accepted">Location tagged</span>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    by {p.location_tagged_by_name || "rep"}
+                  </span>
+                  <a
+                    href={mapsUrl(p.location_lat, p.location_lng)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn secondary sm"
+                  >
+                    View map
+                  </a>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn secondary sm"
+                  disabled={taggingId === p.id}
+                  onClick={(e) => tagLocation(p, e)}
+                  style={{ alignSelf: "flex-start", marginTop: 4 }}
+                >
+                  {taggingId === p.id ? "Tagging…" : "Tag location"}
+                </button>
+              )}
+              <Link to={`/rep/order/${p.id}`} className="rep-order-cta">
+                Place order →
+              </Link>
+            </div>
+          );
+        })}
         {!loading && rows.length === 0 && (
           <div className="empty">
             {debounced

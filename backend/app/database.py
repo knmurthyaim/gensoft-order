@@ -52,6 +52,10 @@ def migrate_db():
         ("products", "product_code", "VARCHAR", "''", "''"),
         ("orders", "remarks", "VARCHAR", "''", "''"),
         ("users", "sales_rep_id", "INTEGER", None, None),
+        ("parties", "location_lat", "REAL", None, None),
+        ("parties", "location_lng", "REAL", None, None),
+        ("parties", "location_tagged_at", "TIMESTAMP", None, None),
+        ("parties", "location_tagged_by_rep_id", "INTEGER", None, None),
     ]
 
     with engine.begin() as conn:

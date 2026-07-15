@@ -157,6 +157,22 @@ def link_party(
     return obj
 
 
+@router.delete("/{party_id}/location", response_model=schemas.Party)
+def clear_party_location(
+    party_id: int,
+    account: models.Account = Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    """Stockist/distributor only — remove tagged customer shop location."""
+    try:
+        obj = crud.clear_party_location(db, account, party_id)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    if not obj:
+        raise HTTPException(status_code=404, detail="Party not found")
+    return obj
+
+
 @router.delete("/{party_id}", status_code=204)
 def delete_party(
     party_id: int,

@@ -100,11 +100,21 @@ class Party(Base):
     pricing_model = Column(String, default="PTR")  # PTR or PTS
     outstanding_balance = Column(Float, default=0.0)
     created_at = Column(DateTime, default=utcnow)
+    # Customer shop GPS tagged by sales reps (shared for all reps of this distributor)
+    location_lat = Column(Float, nullable=True)
+    location_lng = Column(Float, nullable=True)
+    location_tagged_at = Column(DateTime, nullable=True)
+    location_tagged_by_rep_id = Column(
+        Integer, ForeignKey("sales_reps.id"), nullable=True
+    )
 
     owner = relationship("Account", back_populates="parties",
                          foreign_keys=[owner_account_id])
     linked_account = relationship("Account", foreign_keys=[linked_account_id])
     sales_rep = relationship("SalesRep", foreign_keys=[sales_rep_id])
+    location_tagged_by = relationship(
+        "SalesRep", foreign_keys=[location_tagged_by_rep_id]
+    )
 
 
 class SalesRep(Base):

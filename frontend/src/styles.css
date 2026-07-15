@@ -1936,6 +1936,15 @@ textarea {
   font-size: 13px;
   font-weight: 600;
   margin-top: 4px;
+  text-decoration: none;
+}
+
+.rep-loc-tagged {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .badge.ok {

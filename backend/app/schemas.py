@@ -185,6 +185,17 @@ class Party(PartyBase):
     created_at: datetime
     linked_account: Optional[DirectoryAccount] = None
     sales_rep: Optional[SalesRep] = None
+    location_lat: Optional[float] = None
+    location_lng: Optional[float] = None
+    location_tagged_at: Optional[datetime] = None
+    location_tagged_by_rep_id: Optional[int] = None
+    location_tagged_by_name: Optional[str] = None
+
+
+class PartyLocationTag(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy_m: Optional[float] = Field(default=None, ge=0)
 
 
 # ---------- Product ----------
