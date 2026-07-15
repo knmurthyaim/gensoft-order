@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { repApi, getApiBase, tokenStore } from "../api";
 import { useAuth } from "../AuthContext.jsx";
 import { inr, fmtDate } from "../format";
+import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
 import {
   enqueueLocation,
   flushLocationQueue,
@@ -653,6 +654,7 @@ export function RepOutstanding() {
 
 export function RepShell({ children }) {
   const { user, account, salesRep, logout } = useAuth();
+  const [showPassword, setShowPassword] = useState(false);
   // off | sharing | pending | denied | error
   const [locStatus, setLocStatus] = useState("");
 
@@ -906,9 +908,18 @@ export function RepShell({ children }) {
             )}
           </div>
         </div>
-        <button className="logout-btn" onClick={logout}>
-          Logout
-        </button>
+        <div className="rep-header-actions">
+          <button
+            className="logout-btn"
+            onClick={() => setShowPassword(true)}
+            title="Change password"
+          >
+            Password
+          </button>
+          <button className="logout-btn" onClick={logout}>
+            Logout
+          </button>
+        </div>
       </header>
       <nav className="rep-tabs">
         <Link to="/rep">Parties</Link>
@@ -917,6 +928,9 @@ export function RepShell({ children }) {
         <Link to="/rep/orders">My Orders</Link>
       </nav>
       <main className="rep-main">{children}</main>
+      {showPassword && (
+        <ChangePasswordModal onClose={() => setShowPassword(false)} />
+      )}
     </div>
   );
 }
