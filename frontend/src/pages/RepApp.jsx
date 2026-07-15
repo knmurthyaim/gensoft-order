@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { repApi } from "../api";
+import { repApi, getApiBase, tokenStore } from "../api";
 import { useAuth } from "../AuthContext.jsx";
 import { inr, fmtDate } from "../format";
 import {
   enqueueLocation,
   flushLocationQueue,
   queueCount,
+  saveLocationSyncMeta,
+  requestBackgroundSync,
 } from "../repLocationQueue";
+import {
+  isNativeApp,
+  startNativeBackgroundTracking,
+  stopNativeBackgroundTracking,
+} from "../nativeBgLocation";
 
 function aggregate(entry) {
   const batches = entry.batches || [];
@@ -656,6 +663,7 @@ export function RepShell({ children }) {
     let intervalMs = 30 * 1000;
     let minMoveMeters = 50;
     let lastCaptureMs = 0;
+    let usingNative = false;
     const LAST_KEY = "gensoft_rep_last_loc_ms";
 
     const releaseWake = async () => {
@@ -680,21 +688,48 @@ export function RepShell({ children }) {
       }
     };
 
+    const persistMeta = async (enabled) => {
+      await saveLocationSyncMeta({
+        token: tokenStore.get(),
+        apiBase: getApiBase(),
+        enabled,
+        minMoveMeters,
+      });
+    };
+
     const syncToCloud = async () => {
       try {
+        await requestBackgroundSync();
         const result = await flushLocationQueue(repApi.postLocationBatch);
         if (cancelled) return;
         if (result.disabled) {
           setLocStatus("off");
           return;
         }
-        if (result.remaining > 0) setLocStatus("pending");
+        const n = await queueCount();
+        if (result.remaining > 0 || n > 0) setLocStatus("pending");
         else setLocStatus("sharing");
       } catch {
         if (!cancelled) {
-          setLocStatus(queueCount() > 0 ? "pending" : "error");
+          const n = await queueCount();
+          setLocStatus(n > 0 ? "pending" : "error");
         }
       }
+    };
+
+    const savePoint = async (point) => {
+      if (cancelled) return;
+      lastCaptureMs = Date.now();
+      try {
+        localStorage.setItem(LAST_KEY, String(lastCaptureMs));
+      } catch {
+        /* ignore */
+      }
+      await enqueueLocation(point, minMoveMeters);
+      if (!cancelled) {
+        setLocStatus(navigator.onLine ? "sharing" : "pending");
+      }
+      await syncToCloud();
     };
 
     const captureLocal = () => {
@@ -704,29 +739,15 @@ export function RepShell({ children }) {
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          if (cancelled) return;
-          const now = Date.now();
-          lastCaptureMs = now;
-          try {
-            localStorage.setItem(LAST_KEY, String(now));
-          } catch {
-            /* ignore */
-          }
-          // Save on phone only if moved ~50m+ (works without network)
-          enqueueLocation(
-            {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              accuracy_m:
-                typeof pos.coords.accuracy === "number"
-                  ? pos.coords.accuracy
-                  : null,
-              recorded_at: new Date(pos.timestamp || now).toISOString(),
-            },
-            minMoveMeters
-          );
-          setLocStatus(navigator.onLine ? "sharing" : "pending");
-          syncToCloud();
+          savePoint({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy_m:
+              typeof pos.coords.accuracy === "number"
+                ? pos.coords.accuracy
+                : null,
+            recorded_at: new Date(pos.timestamp || Date.now()).toISOString(),
+          });
         },
         (err) => {
           if (cancelled) return;
@@ -745,21 +766,58 @@ export function RepShell({ children }) {
       captureLocal();
     };
 
+    const onSwMessage = (event) => {
+      if (event.data?.type === "GENSOFT_CAPTURE_LOCATION") {
+        captureLocal();
+      }
+    };
+
     const startTracking = async (cfg) => {
       intervalMs = Math.max(15, Number(cfg?.interval_sec) || 30) * 1000;
       minMoveMeters = Math.max(10, Number(cfg?.min_move_meters) || 50);
       setLocStatus(navigator.onLine ? "sharing" : "pending");
+      await persistMeta(true);
       await requestWake();
       await syncToCloud();
-      captureLocal();
-      if (timer) clearInterval(timer);
-      timer = setInterval(tick, intervalMs);
+
+      // Prefer native background GPS (works when app is minimized / screen off)
+      const native = await isNativeApp();
+      if (native) {
+        const res = await startNativeBackgroundTracking({
+          minMoveMeters,
+          onPoint: (p) => savePoint(p),
+          onError: (err) => {
+            if (cancelled) return;
+            if (err?.code === "NOT_AUTHORIZED") setLocStatus("denied");
+          },
+        });
+        usingNative = !!res.started;
+      }
+
+      if (!usingNative) {
+        // Browser: needs app open / in memory. Still saves offline + SW syncs later.
+        captureLocal();
+        if (timer) clearInterval(timer);
+        timer = setInterval(tick, intervalMs);
+      }
+
+      try {
+        const reg = await navigator.serviceWorker?.ready;
+        if (reg?.periodicSync?.register) {
+          await reg.periodicSync.register("gensoft-loc-periodic", {
+            minInterval: 15 * 60 * 1000,
+          });
+        }
+      } catch {
+        /* periodic sync optional */
+      }
     };
 
     const onVisibility = () => {
       if (document.visibilityState !== "visible" || cancelled) return;
       requestWake();
       syncToCloud();
+      if (usingNative) return;
       let last = lastCaptureMs;
       try {
         last = parseInt(localStorage.getItem(LAST_KEY) || "0", 10) || last;
@@ -772,30 +830,32 @@ export function RepShell({ children }) {
     const onOnline = () => {
       if (cancelled) return;
       syncToCloud();
+      navigator.serviceWorker?.controller?.postMessage({
+        type: "GENSOFT_FLUSH_LOCATIONS",
+      });
     };
+
+    navigator.serviceWorker?.addEventListener("message", onSwMessage);
 
     repApi
       .locationConfig()
       .then((cfg) => {
         if (cancelled) return;
         if (!cfg?.enabled) {
+          persistMeta(false);
           setLocStatus("off");
-          return;
-        }
-        if (!navigator.geolocation) {
-          setLocStatus("error");
           return;
         }
         startTracking(cfg);
         document.addEventListener("visibilitychange", onVisibility);
         window.addEventListener("online", onOnline);
       })
-      .catch(() => {
-        // Offline at startup — still try local capture if we previously knew tracking was on
+      .catch(async () => {
         if (cancelled) return;
         const cached = localStorage.getItem("gensoft_rep_track_enabled");
         if (cached === "1" && navigator.geolocation) {
           setLocStatus("pending");
+          await persistMeta(true);
           captureLocal();
           if (timer) clearInterval(timer);
           timer = setInterval(tick, intervalMs);
@@ -811,7 +871,9 @@ export function RepShell({ children }) {
       if (timer) clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("online", onOnline);
+      navigator.serviceWorker?.removeEventListener("message", onSwMessage);
       releaseWake();
+      stopNativeBackgroundTracking();
     };
   }, []);
 

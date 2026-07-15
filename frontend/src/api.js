@@ -1,8 +1,16 @@
 import axios from "axios";
 
-function getApiBase() {
+export function getApiBase() {
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
+  }
+  // Native Cap App has no Vite proxy — use live API
+  try {
+    if (window.Capacitor?.isNativePlatform?.()) {
+      return "https://gensoft-order.onrender.com/api";
+    }
+  } catch {
+    /* ignore */
   }
   const { hostname, protocol } = window.location;
   // Render static site gensoft-order-1 → API service gensoft-order
