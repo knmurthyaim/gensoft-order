@@ -3,6 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { repApi } from "../api";
 import { useAuth } from "../AuthContext.jsx";
 import { inr, fmtDate } from "../format";
+import {
+  enqueueLocation,
+  flushLocationQueue,
+  queueCount,
+} from "../repLocationQueue";
 
 function aggregate(entry) {
   const batches = entry.batches || [];
@@ -564,33 +569,138 @@ export function RepOutstanding() {
 
 export function RepShell({ children }) {
   const { user, account, salesRep, logout } = useAuth();
-  const [locStatus, setLocStatus] = useState(""); // off | sharing | denied | error
+  // off | sharing | pending | denied | error
+  const [locStatus, setLocStatus] = useState("");
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
-    let watchId = null;
     let cancelled = false;
-    let lastSent = 0;
+    let timer = null;
+    let wakeLock = null;
+    let intervalMs = 10 * 60 * 1000;
+    let lastCaptureMs = 0;
+    const LAST_KEY = "gensoft_rep_last_loc_ms";
 
-    const send = (pos) => {
-      const now = Date.now();
-      if (now - lastSent < 55000) return;
-      lastSent = now;
-      repApi
-        .postLocation({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy_m:
-            typeof pos.coords.accuracy === "number" ? pos.coords.accuracy : null,
-          recorded_at: new Date(pos.timestamp || now).toISOString(),
-        })
-        .then((res) => {
+    const refreshPending = () => {
+      if (!cancelled) setPendingCount(queueCount());
+    };
+
+    const releaseWake = async () => {
+      try {
+        if (wakeLock) await wakeLock.release();
+      } catch {
+        /* ignore */
+      }
+      wakeLock = null;
+    };
+
+    const requestWake = async () => {
+      try {
+        if (navigator.wakeLock?.request) {
+          wakeLock = await navigator.wakeLock.request("screen");
+          wakeLock.addEventListener("release", () => {
+            wakeLock = null;
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const syncToCloud = async () => {
+      try {
+        const result = await flushLocationQueue(repApi.postLocationBatch);
+        if (cancelled) return;
+        refreshPending();
+        if (result.disabled) {
+          setLocStatus("off");
+          return;
+        }
+        if (result.remaining > 0) setLocStatus("pending");
+        else if (result.synced > 0 || queueCount() === 0) setLocStatus("sharing");
+      } catch {
+        if (!cancelled) {
+          refreshPending();
+          setLocStatus(queueCount() > 0 ? "pending" : "error");
+        }
+      }
+    };
+
+    const captureLocal = () => {
+      if (!navigator.geolocation) {
+        setLocStatus("error");
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
           if (cancelled) return;
-          if (res?.accepted) setLocStatus("sharing");
-          else setLocStatus("off");
-        })
-        .catch(() => {
-          if (!cancelled) setLocStatus("error");
-        });
+          const now = Date.now();
+          lastCaptureMs = now;
+          try {
+            localStorage.setItem(LAST_KEY, String(now));
+          } catch {
+            /* ignore */
+          }
+          // Always save on phone first (works without network)
+          enqueueLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy_m:
+              typeof pos.coords.accuracy === "number"
+                ? pos.coords.accuracy
+                : null,
+            recorded_at: new Date(pos.timestamp || now).toISOString(),
+          });
+          refreshPending();
+          setLocStatus(navigator.onLine ? "sharing" : "pending");
+          // Then push any queued points when online
+          syncToCloud();
+        },
+        (err) => {
+          if (cancelled) return;
+          setLocStatus(err?.code === 1 ? "denied" : "error");
+        },
+        { enableHighAccuracy: true, maximumAge: 120000, timeout: 30000 }
+      );
+    };
+
+    const tick = () => {
+      const now = Date.now();
+      if (now - lastCaptureMs < Math.min(intervalMs * 0.8, 8 * 60 * 1000)) {
+        syncToCloud();
+        return;
+      }
+      captureLocal();
+    };
+
+    const startTracking = async (cfgIntervalSec) => {
+      intervalMs = Math.max(60, Number(cfgIntervalSec) || 600) * 1000;
+      setLocStatus(navigator.onLine ? "sharing" : "pending");
+      await requestWake();
+      refreshPending();
+      // Upload anything saved from earlier sessions first
+      await syncToCloud();
+      captureLocal();
+      if (timer) clearInterval(timer);
+      timer = setInterval(tick, intervalMs);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible" || cancelled) return;
+      requestWake();
+      syncToCloud();
+      let last = lastCaptureMs;
+      try {
+        last = parseInt(localStorage.getItem(LAST_KEY) || "0", 10) || last;
+      } catch {
+        /* ignore */
+      }
+      if (Date.now() - last >= intervalMs * 0.9) tick();
+    };
+
+    const onOnline = () => {
+      if (cancelled) return;
+      syncToCloud();
     };
 
     repApi
@@ -605,27 +715,51 @@ export function RepShell({ children }) {
           setLocStatus("error");
           return;
         }
-        setLocStatus("sharing");
-        watchId = navigator.geolocation.watchPosition(
-          send,
-          (err) => {
-            if (cancelled) return;
-            setLocStatus(err?.code === 1 ? "denied" : "error");
-          },
-          { enableHighAccuracy: true, maximumAge: 60000, timeout: 20000 }
-        );
+        startTracking(cfg.interval_sec || 600);
+        document.addEventListener("visibilitychange", onVisibility);
+        window.addEventListener("online", onOnline);
       })
       .catch(() => {
-        if (!cancelled) setLocStatus("off");
+        // Offline at startup — still try local capture if we previously knew tracking was on
+        if (cancelled) return;
+        const cached = localStorage.getItem("gensoft_rep_track_enabled");
+        if (cached === "1" && navigator.geolocation) {
+          setLocStatus("pending");
+          captureLocal();
+          if (timer) clearInterval(timer);
+          timer = setInterval(tick, intervalMs);
+          document.addEventListener("visibilitychange", onVisibility);
+          window.addEventListener("online", onOnline);
+        } else {
+          setLocStatus("off");
+        }
       });
 
     return () => {
       cancelled = true;
-      if (watchId != null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(watchId);
-      }
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
+      releaseWake();
     };
   }, []);
+
+  // Remember tracking enabled flag for offline reopen
+  useEffect(() => {
+    if (locStatus === "off") {
+      try {
+        localStorage.setItem("gensoft_rep_track_enabled", "0");
+      } catch {
+        /* ignore */
+      }
+    } else if (locStatus === "sharing" || locStatus === "pending") {
+      try {
+        localStorage.setItem("gensoft_rep_track_enabled", "1");
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [locStatus]);
 
   return (
     <div className="rep-app">
@@ -635,7 +769,14 @@ export function RepShell({ children }) {
           <div className="rep-header-sub">
             {salesRep?.name || user?.name} · {account?.name}
             {locStatus === "sharing" && (
-              <span className="rep-loc-badge"> · Location on</span>
+              <span className="rep-loc-badge"> · Loc every 10 min</span>
+            )}
+            {locStatus === "pending" && (
+              <span className="rep-loc-badge warn">
+                {" "}
+                · Saved on phone
+                {pendingCount > 0 ? ` (${pendingCount})` : ""} — will sync
+              </span>
             )}
             {locStatus === "denied" && (
               <span className="rep-loc-badge warn"> · Location blocked</span>

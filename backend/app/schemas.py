@@ -415,11 +415,23 @@ class RepLocationPing(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     accuracy_m: Optional[float] = Field(default=None, ge=0)
     recorded_at: Optional[datetime] = None
+    local_id: Optional[str] = None  # client queue id for offline sync ack
+
+
+class RepLocationBatch(BaseModel):
+    points: List[RepLocationPing] = Field(default_factory=list, max_length=500)
+
+
+class RepLocationBatchResult(BaseModel):
+    accepted: bool = True
+    saved: int = 0
+    skipped: int = 0
+    reason: Optional[str] = None
 
 
 class RepLocationConfig(BaseModel):
     enabled: bool = False
-    interval_sec: int = 120
+    interval_sec: int = 600
     retention_days: int = 7
 
 

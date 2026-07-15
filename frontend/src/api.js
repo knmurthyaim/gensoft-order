@@ -185,6 +185,8 @@ export const repApi = {
     api.get("/rep/location-config").then((r) => r.data),
   postLocation: (data) =>
     api.post("/rep/location", data).then((r) => r.data),
+  postLocationBatch: (data) =>
+    api.post("/rep/location/batch", data).then((r) => r.data),
   createOrder: (data) =>
     api.post("/rep/orders", data).then((r) => r.data),
   orders: () => api.get("/rep/orders").then((r) => r.data),

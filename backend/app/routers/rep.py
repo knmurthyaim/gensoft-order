@@ -195,3 +195,17 @@ def post_location(
         "id": ping.id,
         "recorded_at": ping.recorded_at,
     }
+
+
+@router.post("/location/batch", response_model=schemas.RepLocationBatchResult)
+def post_location_batch(
+    data: schemas.RepLocationBatch,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Upload offline-queued GPS points when the phone comes online."""
+    _require_rep(user)
+    try:
+        return crud.record_rep_locations_batch(db, user, data)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

@@ -339,7 +339,8 @@ def delete_sales_rep(db: Session, account, rep_id) -> bool:
 
 
 LOCATION_RETENTION_DAYS = 7
-LOCATION_MIN_INTERVAL_SEC = 60
+LOCATION_MIN_INTERVAL_SEC = 8 * 60  # allow slightly early vs 10-min client cadence
+LOCATION_INTERVAL_SEC = 10 * 60
 
 
 def _prune_old_locations(db: Session, owner_account_id: Optional[int] = None):
@@ -361,7 +362,7 @@ def get_rep_location_config(db: Session, user: models.User) -> schemas.RepLocati
     enabled = bool(account and getattr(account, "track_salesrep_location", False))
     return schemas.RepLocationConfig(
         enabled=enabled,
-        interval_sec=120,
+        interval_sec=LOCATION_INTERVAL_SEC,
         retention_days=LOCATION_RETENTION_DAYS,
     )
 
@@ -420,6 +421,95 @@ def record_rep_location(
     db.commit()
     db.refresh(ping)
     return ping
+
+
+def record_rep_locations_batch(
+    db: Session, user: models.User, data: schemas.RepLocationBatch
+) -> schemas.RepLocationBatchResult:
+    """Accept offline-queued GPS points; insert any not already near an existing ping."""
+    if user.role != "rep" or not user.sales_rep_id or not user.account_id:
+        raise AppError("Sales rep login required")
+    account = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not account or not getattr(account, "track_salesrep_location", False):
+        return schemas.RepLocationBatchResult(
+            accepted=False, saved=0, skipped=0, reason="tracking_disabled"
+        )
+
+    rep = (
+        db.query(models.SalesRep)
+        .filter(
+            models.SalesRep.id == user.sales_rep_id,
+            models.SalesRep.owner_account_id == account.id,
+        )
+        .first()
+    )
+    if not rep:
+        raise AppError("Sales rep not found")
+
+    _prune_old_locations(db, account.id)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=LOCATION_RETENTION_DAYS)
+    existing = (
+        db.query(models.SalesRepLocation)
+        .filter(
+            models.SalesRepLocation.sales_rep_id == rep.id,
+            models.SalesRepLocation.recorded_at >= cutoff,
+        )
+        .all()
+    )
+    existing_times: List[datetime] = []
+    for row in existing:
+        at = row.recorded_at
+        if at is None:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        existing_times.append(at)
+
+    def too_close(candidate: datetime) -> bool:
+        for at in existing_times:
+            if abs((candidate - at).total_seconds()) < LOCATION_MIN_INTERVAL_SEC:
+                return True
+        return False
+
+    saved = 0
+    skipped = 0
+    now = datetime.now(timezone.utc)
+    ordered = sorted(
+        data.points or [],
+        key=lambda p: p.recorded_at or now,
+    )
+    for item in ordered:
+        recorded = item.recorded_at or now
+        if recorded.tzinfo is None:
+            recorded = recorded.replace(tzinfo=timezone.utc)
+        if recorded < cutoff:
+            skipped += 1
+            continue
+        if too_close(recorded):
+            skipped += 1
+            continue
+        ping = models.SalesRepLocation(
+            owner_account_id=account.id,
+            sales_rep_id=rep.id,
+            latitude=float(item.latitude),
+            longitude=float(item.longitude),
+            accuracy_m=float(item.accuracy_m)
+            if item.accuracy_m is not None
+            else None,
+            recorded_at=recorded,
+        )
+        db.add(ping)
+        existing_times.append(recorded)
+        saved += 1
+
+    if saved:
+        db.commit()
+    return schemas.RepLocationBatchResult(
+        accepted=True, saved=saved, skipped=skipped, reason=None
+    )
 
 
 def get_sales_rep_locations_latest(

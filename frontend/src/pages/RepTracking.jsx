@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { salesReps } from "../api";
-import { fmtDate } from "../format";
+import { fmtDateTime } from "../format";
 
 function mapsUrl(lat, lng) {
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`;
@@ -19,13 +19,6 @@ function ageLabel(minutes) {
   const h = Math.floor(minutes / 60);
   if (h < 48) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
-}
-
-function fmtDateTime(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return fmtDate(iso);
-  return d.toLocaleString();
 }
 
 export default function RepTracking() {
@@ -77,8 +70,9 @@ export default function RepTracking() {
         <div>
           <h1 className="page-title">Rep Location</h1>
           <p className="page-sub">
-            Live positions from your sales reps (distributor only). History is
-            kept for 7 days. Turn on in{" "}
+            Positions are saved on the rep&apos;s phone every 10 minutes, then
+            uploaded when they open GenSoft or get network. History is kept for
+            7 days. Enable in{" "}
             <Link to="/settings">Settings → Sales Rep Tracking</Link>.
           </p>
         </div>
@@ -122,6 +116,7 @@ export default function RepTracking() {
                     </span>
                     <div className="muted" style={{ marginTop: 4 }}>
                       {fmtDateTime(r.recorded_at)}
+                      {r.recorded_at ? " IST" : ""}
                     </div>
                   </td>
                   <td>
@@ -194,7 +189,9 @@ export default function RepTracking() {
                 )}
                 {trail.map((p) => (
                   <div key={p.id} className="rep-track-trail-row">
-                    <span>{fmtDateTime(p.recorded_at)}</span>
+                    <span>
+                      {fmtDateTime(p.recorded_at)} IST
+                    </span>
                     <a
                       href={mapsUrl(p.latitude, p.longitude)}
                       target="_blank"
