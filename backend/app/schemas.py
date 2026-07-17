@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------- Auth ----------
@@ -596,7 +596,35 @@ class OutstandingBillUploadItem(BaseModel):
         ge=0,
         description="Ignored when invoice_date is set; age is calculated from invoice date.",
     )
-    discount: float = Field(ge=0, default=0)
+    # ERP exports sometimes send credit/adj as negative discount — allow it
+    discount: float = 0.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_excel_numbers(cls, data):
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        for key in ("amount", "paid", "balance", "discount"):
+            if key in out and out[key] not in (None, ""):
+                try:
+                    out[key] = float(out[key])
+                except (TypeError, ValueError):
+                    out[key] = 0.0 if key != "balance" else None
+        if "age" in out and out["age"] not in (None, ""):
+            try:
+                out["age"] = int(float(out["age"]))
+            except (TypeError, ValueError):
+                out["age"] = None
+        # Clamp noisy negatives from billing exports (except discount credits)
+        for key in ("amount", "paid"):
+            if isinstance(out.get(key), (int, float)) and out[key] < 0:
+                out[key] = 0.0
+        if isinstance(out.get("balance"), (int, float)) and out["balance"] < 0:
+            out["balance"] = 0.0
+        if isinstance(out.get("age"), int) and out["age"] < 0:
+            out["age"] = 0
+        return out
 
 
 class OutstandingBillUpload(BaseModel):

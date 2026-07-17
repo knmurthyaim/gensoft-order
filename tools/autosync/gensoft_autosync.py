@@ -27,7 +27,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 APP_NAME = "GenSoft Sync"
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 TASK_NAME = "GenSoftSync"
 DEFAULT_API = "https://gensoft-order.onrender.com"
 
@@ -35,23 +35,29 @@ DEFAULT_API = "https://gensoft-order.onrender.com"
 FILE_NAMES = {
     "customers": [
         "customers.xlsx",
+        "customers.xls",
         "customers.csv",
         "customers.txt",
         "parties.xlsx",
+        "parties.xls",
         "parties.txt",
     ],
     "products": [
         "products_stock.xlsx",
+        "products_stock.xls",
         "products_stock.csv",
         "products_stock.txt",
         "products.xlsx",
+        "products.xls",
         "products.txt",
     ],
     "outstanding": [
         "outstanding.xlsx",
+        "outstanding.xls",
         "outstanding.csv",
         "outstanding.txt",
         "bills.xlsx",
+        "bills.xls",
         "bills.txt",
     ],
 }
@@ -246,7 +252,7 @@ def safe_delete(path: Path, log) -> None:
             log(f"  Deleted {path.name}")
         # Also remove matching .txt/.csv source if we uploaded .xlsx
         stem = path.stem
-        for ext in (".txt", ".csv", ".tsv"):
+        for ext in (".txt", ".csv", ".tsv", ".xls"):
             sibling = path.with_name(stem + ext)
             if sibling.is_file() and sibling != path:
                 sibling.unlink()
@@ -309,9 +315,9 @@ def run_sync_cycle(cfg: configparser.ConfigParser, log) -> None:
         raise RuntimeError(
             f"No Excel files found in {folder}.\n"
             "Your PRG must create at least one of:\n"
-            "  customers.xlsx\n"
-            "  products_stock.xlsx\n"
-            "  outstanding.xlsx\n"
+            "  customers.xlsx / customers.xls\n"
+            "  products_stock.xlsx / products_stock.xls\n"
+            "  outstanding.xlsx / outstanding.xls\n"
             "(in the same folder as GenSoftSync.exe when folder = .)"
         )
 

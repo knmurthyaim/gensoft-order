@@ -168,11 +168,35 @@ def upload_file(
     if progress_cb:
         progress_cb(f"Preparing {file_path.name} ({size_mb:.1f} MB)…")
 
+    upload_path = file_path
+    upload_name = file_path.name
+    if suffix == ".xls":
+        # Cloud API expects .xlsx — convert legacy Excel first
+        try:
+            from export_files import xls_to_xlsx
+        except ImportError:
+            # when running from tools/uploader, look beside autosync
+            import sys as _sys
+            from pathlib import Path as _Path
+
+            sibling = _Path(__file__).resolve().parent.parent / "autosync"
+            if str(sibling) not in _sys.path:
+                _sys.path.insert(0, str(sibling))
+            from export_files import xls_to_xlsx
+
+        converted = file_path.with_suffix(".xlsx")
+        if progress_cb:
+            progress_cb(f"Converting {file_path.name} → {converted.name}…")
+        xls_to_xlsx(file_path, converted)
+        upload_path = converted
+        upload_name = converted.name
+        suffix = ".xlsx"
+
     if suffix == ".xlsx":
         url = f"{api_base}{meta['excel_path']}"
         if replace_all:
             url = f"{url}?replace_all=true"
-        with open(file_path, "rb") as f:
+        with open(upload_path, "rb") as f:
             if progress_cb:
                 progress_cb("Uploading Excel to cloud (please wait)…")
             resp = requests.post(
@@ -180,7 +204,7 @@ def upload_file(
                 headers=headers,
                 files={
                     "file": (
-                        file_path.name,
+                        upload_name,
                         f,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
@@ -210,7 +234,7 @@ def upload_file(
             timeout=timeout,
         )
     else:
-        raise ValueError("File must be .xlsx or .json")
+        raise ValueError("File must be .xlsx, .xls, or .json")
 
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Upload failed ({resp.status_code}): {_error_detail(resp)}")
@@ -350,7 +374,7 @@ class UploaderApp:
         self.type_combo.grid(row=5, column=1, sticky="w", **pad)
         self.type_combo.bind("<<ComboboxSelected>>", self._on_type_change)
 
-        ttk.Label(frm, text="File (.xlsx / .json):").grid(
+        ttk.Label(frm, text="File (.xlsx / .xls / .json):").grid(
             row=6, column=0, sticky="w", **pad
         )
         ttk.Entry(frm, textvariable=self.file_var, width=40).grid(
@@ -418,7 +442,7 @@ class UploaderApp:
         path = filedialog.askopenfilename(
             title="Select data file",
             filetypes=[
-                ("Excel", "*.xlsx"),
+                ("Excel", "*.xlsx;*.xls"),
                 ("JSON", "*.json"),
                 ("All", "*.*"),
             ],

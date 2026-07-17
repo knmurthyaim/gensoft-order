@@ -2781,41 +2781,56 @@ def upload_outstanding_from_excel_rows(
     replace_all: bool = False,
 ) -> schemas.OutstandingBillUploadResult:
     bills = []
-    for row in rows:
-        party_name = str(row.get("party_name", "")).strip()
-        invoice_no = str(row.get("invoice_no", "")).strip()
-        if not party_name or not invoice_no:
-            continue
-        inv_date = _parse_upload_date(row.get("invoice_date"))
-        amount = float(row.get("amount", 0) or 0)
-        paid = float(row.get("paid", 0) or 0)
-        discount = float(row.get("discount", 0) or 0)
-        balance_raw = row.get("balance")
-        balance = (
-            float(balance_raw)
-            if balance_raw not in (None, "")
-            else None
-        )
-        age_raw = row.get("age")
-        age = int(age_raw) if age_raw not in (None, "") else None
-        bills.append(
-            schemas.OutstandingBillUploadItem(
-                party_id=str(row.get("party_id", "")).strip(),
-                party_name=party_name,
-                invoice_no=invoice_no,
-                invoice_date=inv_date,
-                amount=amount,
-                paid=paid,
-                balance=balance,
-                age=age,
-                discount=discount,
+    row_errors: List[str] = []
+    for i, row in enumerate(rows, start=1):
+        try:
+            party_name = str(
+                row.get("party_name") or row.get("name") or ""
+            ).strip()
+            invoice_no = str(row.get("invoice_no", "") or "").strip()
+            if not party_name or not invoice_no:
+                continue
+            inv_date = _parse_upload_date(row.get("invoice_date"))
+            amount = float(row.get("amount", 0) or 0)
+            paid = float(row.get("paid", 0) or 0)
+            discount = float(row.get("discount", 0) or 0)
+            balance_raw = row.get("balance")
+            balance = (
+                float(balance_raw)
+                if balance_raw not in (None, "")
+                else None
             )
+            age_raw = row.get("age")
+            age = int(float(age_raw)) if age_raw not in (None, "") else None
+            bills.append(
+                schemas.OutstandingBillUploadItem(
+                    party_id=str(row.get("party_id", "") or "").strip(),
+                    party_name=party_name,
+                    invoice_no=invoice_no,
+                    invoice_date=inv_date,
+                    amount=max(amount, 0.0),
+                    paid=max(paid, 0.0),
+                    balance=None if balance is None else max(balance, 0.0),
+                    age=None if age is None else max(age, 0),
+                    discount=discount,  # negative discounts allowed (ERP credits)
+                )
+            )
+        except Exception as exc:
+            row_errors.append(f"Excel row {i}: {exc}")
+    if not bills:
+        raise AppError(
+            "No valid outstanding rows found. "
+            + ("; ".join(row_errors[:3]) if row_errors else "Check party_name and invoice_no columns.")
         )
-    return upload_outstanding_bills(
+    result = upload_outstanding_bills(
         db,
         account,
         schemas.OutstandingBillUpload(replace_all=replace_all, bills=bills),
     )
+    if row_errors:
+        result.errors = row_errors + list(result.errors or [])
+        result.failed = int(result.failed or 0) + len(row_errors)
+    return result
 
 
 # ---------- Super Admin ----------

@@ -69,9 +69,11 @@ Expected names:
 
 | File | Data |
 |------|------|
-| `customers.xlsx` | Parties |
-| `products_stock.xlsx` | Products + stock |
-| `outstanding.xlsx` | Outstanding |
+| `customers.xlsx` or `customers.xls` | Parties |
+| `products_stock.xlsx` or `.xls` | Products + stock |
+| `outstanding.xlsx` or `.xls` | Outstanding |
+
+`.xls` files are auto-converted to `.xlsx` before upload.
 
 ### 5. Run
 

@@ -14,6 +14,7 @@ echo Building GenSoftSync.exe (one file)...
 pyinstaller --noconfirm --onefile --windowed --name GenSoftSync ^
   --paths . ^
   --hidden-import=openpyxl ^
+  --hidden-import=xlrd ^
   --hidden-import=requests ^
   --hidden-import=export_files ^
   --hidden-import=gensoft_upload ^

@@ -94,7 +94,7 @@ async def upload_customers_excel(
     db: Session = Depends(get_db),
 ):
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx)")
+        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xls)")
     content = await file.read()
     try:
         parsed = parse_excel_upload(content)

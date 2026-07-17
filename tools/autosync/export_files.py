@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -19,28 +20,34 @@ FILE_CANDIDATES = {
         "customers.tsv",
         "customers.txt",
         "parties.xlsx",
+        "parties.xls",
         "parties.csv",
         "parties.txt",
     ],
     "products": [
         "products_stock.xlsx",
+        "products_stock.xls",
         "products_stock.csv",
         "products_stock.tsv",
         "products_stock.txt",
         "products.xlsx",
+        "products.xls",
         "products.csv",
         "products.tsv",
         "products.txt",
         "stock.xlsx",
+        "stock.xls",
         "stock.csv",
         "stock.txt",
     ],
     "outstanding": [
         "outstanding.xlsx",
+        "outstanding.xls",
         "outstanding.csv",
         "outstanding.tsv",
         "outstanding.txt",
         "bills.xlsx",
+        "bills.xls",
         "bills.csv",
         "bills.txt",
     ],
@@ -83,6 +90,71 @@ def delimited_to_xlsx(src: Path, dest: Path) -> Path:
     return dest
 
 
+def xls_to_xlsx(src: Path, dest: Path) -> Path:
+    """Convert legacy Excel .xls → .xlsx (VFP often writes .xls)."""
+    try:
+        import xlrd
+    except ImportError as exc:
+        raise RuntimeError(
+            "Reading .xls requires xlrd. Reinstall GenSoftSync / pip install xlrd."
+        ) from exc
+
+    book = xlrd.open_workbook(str(src))
+    sheet = book.sheet_by_index(0)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (dest.stem[:31] or "Sheet1")
+
+    for r in range(sheet.nrows):
+        row = []
+        for c in range(sheet.ncols):
+            cell = sheet.cell(r, c)
+            if cell.ctype == xlrd.XL_CELL_DATE:
+                try:
+                    dt = xlrd.xldate_as_datetime(cell.value, book.datemode)
+                    if (
+                        isinstance(dt, datetime)
+                        and dt.hour == 0
+                        and dt.minute == 0
+                        and dt.second == 0
+                        and dt.microsecond == 0
+                    ):
+                        row.append(dt.date())
+                    else:
+                        row.append(dt)
+                except Exception:
+                    row.append(cell.value)
+            elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                v = cell.value
+                row.append(int(v) if float(v).is_integer() else v)
+            elif cell.ctype == xlrd.XL_CELL_BOOLEAN:
+                row.append(bool(cell.value))
+            elif cell.ctype == xlrd.XL_CELL_EMPTY:
+                row.append("")
+            else:
+                row.append(cell.value)
+        ws.append(row)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(dest)
+    return dest
+
+
+def ensure_xlsx(src: Path, log: LogFn | None = None) -> Path:
+    """Return an .xlsx path, converting .xls / .csv / .txt when needed."""
+    suffix = src.suffix.lower()
+    if suffix == ".xlsx":
+        return src
+    dest = src.with_suffix(".xlsx")
+    if suffix == ".xls":
+        _log(log, f"Converting {src.name} → {dest.name}")
+        return xls_to_xlsx(src, dest)
+    if suffix in (".csv", ".tsv", ".txt"):
+        _log(log, f"Converting {src.name} → {dest.name}")
+        return delimited_to_xlsx(src, dest)
+    raise RuntimeError(f"Unsupported file type: {src.name} (use .xlsx or .xls)")
+
+
 def resolve_export_files(
     export_dir: Path,
     sync_types: str,
@@ -90,7 +162,7 @@ def resolve_export_files(
 ) -> dict[str, Path]:
     """
     Find customers/products/outstanding files in export_dir.
-    Converts .csv/.tsv/.txt to .xlsx beside them when needed.
+    Converts .xls / .csv / .tsv / .txt → .xlsx when needed.
     """
     export_dir.mkdir(parents=True, exist_ok=True)
     wanted = {
@@ -112,14 +184,9 @@ def resolve_export_files(
         if not hit:
             _log(log, f"Missing file for {utype} in {export_dir}")
             continue
-        if hit.suffix.lower() in (".csv", ".tsv", ".txt"):
-            xlsx = hit.with_suffix(".xlsx")
-            _log(log, f"Converting {hit.name} → {xlsx.name}")
-            delimited_to_xlsx(hit, xlsx)
-            found[utype] = xlsx
-        else:
-            found[utype] = hit
-            _log(log, f"Using {hit.name} for {utype}")
+        xlsx = ensure_xlsx(hit, log=log)
+        found[utype] = xlsx
+        _log(log, f"Using {xlsx.name} for {utype}")
 
     return found
 
