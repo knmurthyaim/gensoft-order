@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../AuthContext.jsx";
 import ChangePasswordModal from "./ChangePasswordModal.jsx";
 
+/** Nav groups: Orders / Stock / Parties / Rep / Utility (build 2026-07-17) */
 export default function TopNav() {
   const { account, user, logout } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
