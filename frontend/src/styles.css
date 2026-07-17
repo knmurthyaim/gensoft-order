@@ -553,6 +553,68 @@ details summary {
   font-weight: 600;
 }
 
+.zennx-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.zennx-menu.active > .zennx-menu-trigger,
+.zennx-menu.open > .zennx-menu-trigger {
+  color: #fff;
+  border-bottom-color: #fff;
+  font-weight: 600;
+}
+
+.zennx-menu-trigger {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font: inherit;
+  gap: 4px;
+}
+
+.zennx-menu-caret {
+  font-size: 10px;
+  opacity: 0.85;
+  line-height: 1;
+}
+
+.zennx-submenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 180px;
+  margin-top: 0;
+  padding: 6px 0;
+  background: #fff;
+  color: var(--text);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  z-index: 50;
+}
+
+.zennx-submenu-link {
+  display: block;
+  padding: 9px 14px;
+  color: #1e293b;
+  text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.zennx-submenu-link:hover {
+  background: #eff6ff;
+  color: var(--zennx-blue);
+}
+
+.zennx-submenu-link.active {
+  background: #eff6ff;
+  color: var(--zennx-blue);
+  font-weight: 600;
+}
+
 .zennx-header-actions {
   display: flex;
   align-items: center;
