@@ -190,6 +190,7 @@ class Party(PartyBase):
     location_tagged_at: Optional[datetime] = None
     location_tagged_by_rep_id: Optional[int] = None
     location_tagged_by_name: Optional[str] = None
+    outstanding_bill_count: int = 0
 
 
 class PartyLocationTag(BaseModel):
@@ -495,6 +496,30 @@ class AdminUserUpdate(BaseModel):
     password: Optional[str] = Field(default=None, min_length=4)
     name: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class AdminDataSummary(BaseModel):
+    account_id: int
+    gensoft_code: str
+    name: str
+    product_count: int = 0
+    stock_batch_count: int = 0
+    stock_qty_total: int = 0
+    party_count: int = 0
+    customer_count: int = 0
+    outstanding_count: int = 0
+    outstanding_balance_total: float = 0.0
+    products_last_synced: Optional[datetime] = None
+    parties_last_synced: Optional[datetime] = None
+    outstanding_last_synced: Optional[datetime] = None
+    products_size_mb: float = 0.0
+    parties_size_mb: float = 0.0
+    outstanding_size_mb: float = 0.0
+
+
+class AdminClearResult(BaseModel):
+    deleted: int
+    message: str = ""
 
 
 class BulkUploadResult(BaseModel):

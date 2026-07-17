@@ -739,9 +739,34 @@ def delete_party(db: Session, account, party_id) -> bool:
     obj = get_party(db, account, party_id)
     if not obj:
         return False
+    outstanding_n = _party_outstanding_count(db, account.id, obj)
+    if outstanding_n > 0:
+        raise AppError(
+            f"Cannot delete customer '{obj.name}' — {outstanding_n} outstanding "
+            "bill(s) are linked. Delete outstanding for this customer first."
+        )
     db.delete(obj)
     db.commit()
     return True
+
+
+def _party_outstanding_count(
+    db: Session, owner_account_id: int, party: models.Party
+) -> int:
+    """Count outstanding bills linked to a party (by party_ref_id or party code)."""
+    filters = [models.OutstandingBill.party_ref_id == party.id]
+    code = (party.code or "").strip()
+    if code:
+        filters.append(models.OutstandingBill.party_id == code)
+    return (
+        db.query(func.count(models.OutstandingBill.id))
+        .filter(
+            models.OutstandingBill.owner_account_id == owner_account_id,
+            or_(*filters),
+        )
+        .scalar()
+        or 0
+    )
 
 
 # ---------- Products (scoped) ----------
@@ -2323,7 +2348,10 @@ def upload_products_with_stock(
 
 
 def upload_products_from_excel_rows(
-    db: Session, account: models.Account, rows: List[dict]
+    db: Session,
+    account: models.Account,
+    rows: List[dict],
+    replace_all: bool = False,
 ) -> schemas.BulkUploadResult:
     grouped: dict[str, schemas.ProductStockUploadItem] = {}
     order: List[str] = []
@@ -2366,7 +2394,9 @@ def upload_products_from_excel_rows(
         )
     products = [grouped[k] for k in order]
     return upload_products_with_stock(
-        db, account, schemas.ProductStockUpload(replace_all=False, products=products)
+        db,
+        account,
+        schemas.ProductStockUpload(replace_all=replace_all, products=products),
     )
 
 
@@ -2439,7 +2469,10 @@ def upload_customers(
 
 
 def upload_customers_from_excel_rows(
-    db: Session, account: models.Account, rows: List[dict]
+    db: Session,
+    account: models.Account,
+    rows: List[dict],
+    replace_all: bool = False,
 ) -> schemas.BulkUploadResult:
     customers = []
     for row in rows:
@@ -2462,12 +2495,17 @@ def upload_customers_from_excel_rows(
             )
         )
     return upload_customers(
-        db, account, schemas.CustomerUpload(replace_all=False, customers=customers)
+        db,
+        account,
+        schemas.CustomerUpload(replace_all=replace_all, customers=customers),
     )
 
 
 def upload_outstanding_from_excel_rows(
-    db: Session, account: models.Account, rows: List[dict]
+    db: Session,
+    account: models.Account,
+    rows: List[dict],
+    replace_all: bool = False,
 ) -> schemas.OutstandingBillUploadResult:
     bills = []
     for row in rows:
@@ -2503,13 +2541,45 @@ def upload_outstanding_from_excel_rows(
     return upload_outstanding_bills(
         db,
         account,
-        schemas.OutstandingBillUpload(replace_all=False, bills=bills),
+        schemas.OutstandingBillUpload(replace_all=replace_all, bills=bills),
     )
 
 
 # ---------- Super Admin ----------
-def list_admin_accounts(db: Session) -> List[schemas.AdminAccountRow]:
-    accounts = db.query(models.Account).order_by(models.Account.name).all()
+def list_admin_accounts(
+    db: Session, search: Optional[str] = None
+) -> List[schemas.AdminAccountRow]:
+    q = db.query(models.Account)
+    term = (search or "").strip()
+    if term:
+        like = f"%{term}%"
+        owner_ids = [
+            u.account_id
+            for u in db.query(models.User)
+            .filter(
+                models.User.role == "owner",
+                or_(
+                    models.User.username.ilike(like),
+                    models.User.name.ilike(like),
+                ),
+            )
+            .all()
+            if u.account_id
+        ]
+        filters = [
+            models.Account.gensoft_code.ilike(like),
+            models.Account.name.ilike(like),
+            models.Account.owner_name.ilike(like),
+            models.Account.mobile.ilike(like),
+            models.Account.gst_no.ilike(like),
+            models.Account.dl_no.ilike(like),
+            models.Account.area.ilike(like),
+            models.Account.city.ilike(like),
+        ]
+        if owner_ids:
+            filters.append(models.Account.id.in_(owner_ids))
+        q = q.filter(or_(*filters))
+    accounts = q.order_by(models.Account.name).all()
     rows = []
     for acc in accounts:
         owner = (
@@ -2562,6 +2632,144 @@ def admin_update_account(db: Session, account_id: int, data: schemas.AdminAccoun
     return admin_get_account(db, account_id)
 
 
+def admin_delete_account(db: Session, account_id: int) -> bool:
+    """Permanently remove a registered customer/account and related data."""
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        return False
+
+    # Orders where this account is buyer or supplier
+    order_ids = [
+        o.id
+        for o in db.query(models.Order.id)
+        .filter(
+            or_(
+                models.Order.buyer_account_id == account_id,
+                models.Order.supplier_account_id == account_id,
+            )
+        )
+        .all()
+    ]
+    if order_ids:
+        db.query(models.OrderItem).filter(
+            models.OrderItem.order_id.in_(order_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.Order).filter(models.Order.id.in_(order_ids)).delete(
+            synchronize_session=False
+        )
+
+    db.query(models.OutstandingBill).filter(
+        models.OutstandingBill.owner_account_id == account_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.Connection).filter(
+        or_(
+            models.Connection.requester_account_id == account_id,
+            models.Connection.supplier_account_id == account_id,
+        )
+    ).delete(synchronize_session=False)
+
+    # Unlink other tenants' parties pointing at this account
+    db.query(models.Party).filter(
+        models.Party.linked_account_id == account_id
+    ).update({models.Party.linked_account_id: None}, synchronize_session=False)
+
+    party_ids = [
+        p.id
+        for p in db.query(models.Party.id)
+        .filter(models.Party.owner_account_id == account_id)
+        .all()
+    ]
+    if party_ids:
+        db.query(models.OutstandingBill).filter(
+            models.OutstandingBill.party_ref_id.in_(party_ids)
+        ).update(
+            {models.OutstandingBill.party_ref_id: None}, synchronize_session=False
+        )
+        db.query(models.Order).filter(models.Order.party_id.in_(party_ids)).update(
+            {models.Order.party_id: None}, synchronize_session=False
+        )
+
+    db.query(models.SalesRepLocation).filter(
+        models.SalesRepLocation.owner_account_id == account_id
+    ).delete(synchronize_session=False)
+
+    rep_ids = [
+        r.id
+        for r in db.query(models.SalesRep.id)
+        .filter(models.SalesRep.owner_account_id == account_id)
+        .all()
+    ]
+    if rep_ids:
+        db.query(models.Party).filter(
+            models.Party.sales_rep_id.in_(rep_ids)
+        ).update({models.Party.sales_rep_id: None}, synchronize_session=False)
+        db.query(models.Party).filter(
+            models.Party.location_tagged_by_rep_id.in_(rep_ids)
+        ).update(
+            {models.Party.location_tagged_by_rep_id: None}, synchronize_session=False
+        )
+        db.query(models.Order).filter(
+            models.Order.sales_rep_id.in_(rep_ids)
+        ).update({models.Order.sales_rep_id: None}, synchronize_session=False)
+        db.query(models.User).filter(
+            models.User.sales_rep_id.in_(rep_ids)
+        ).update({models.User.sales_rep_id: None}, synchronize_session=False)
+
+    product_ids = [
+        p.id
+        for p in db.query(models.Product.id)
+        .filter(models.Product.owner_account_id == account_id)
+        .all()
+    ]
+    if product_ids:
+        # Clear order-item refs that might still point at these products/batches
+        batch_ids = [
+            b.id
+            for b in db.query(models.StockBatch.id)
+            .filter(models.StockBatch.product_id.in_(product_ids))
+            .all()
+        ]
+        if batch_ids:
+            db.query(models.OrderItem).filter(
+                models.OrderItem.batch_id.in_(batch_ids)
+            ).update({models.OrderItem.batch_id: None}, synchronize_session=False)
+        leftover_items = (
+            db.query(models.OrderItem)
+            .filter(models.OrderItem.product_id.in_(product_ids))
+            .all()
+        )
+        if leftover_items:
+            leftover_order_ids = {i.order_id for i in leftover_items}
+            db.query(models.OrderItem).filter(
+                models.OrderItem.product_id.in_(product_ids)
+            ).delete(synchronize_session=False)
+            # orphan empty? leave orders; only items removed
+            _ = leftover_order_ids
+        db.query(models.StockBatch).filter(
+            models.StockBatch.owner_account_id == account_id
+        ).delete(synchronize_session=False)
+        db.query(models.Product).filter(
+            models.Product.owner_account_id == account_id
+        ).delete(synchronize_session=False)
+
+    db.query(models.Party).filter(
+        models.Party.owner_account_id == account_id
+    ).delete(synchronize_session=False)
+
+    if rep_ids:
+        db.query(models.SalesRep).filter(models.SalesRep.id.in_(rep_ids)).delete(
+            synchronize_session=False
+        )
+
+    db.query(models.User).filter(models.User.account_id == account_id).delete(
+        synchronize_session=False
+    )
+    db.delete(acc)
+    db.commit()
+    return True
+
+
 def admin_update_user(db: Session, user_id: int, data: schemas.AdminUserUpdate):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user or user.role == "platform_admin":
@@ -2586,6 +2794,368 @@ def admin_update_user(db: Session, user_id: int, data: schemas.AdminUserUpdate):
     if user.account_id:
         return admin_get_account(db, user.account_id)
     return None
+
+
+def admin_account_data_summary(
+    db: Session, account_id: int
+) -> Optional[schemas.AdminDataSummary]:
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        return None
+    product_count = (
+        db.query(func.count(models.Product.id))
+        .filter(models.Product.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    stock_batch_count = (
+        db.query(func.count(models.StockBatch.id))
+        .filter(models.StockBatch.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    stock_qty_total = (
+        db.query(func.coalesce(func.sum(models.StockBatch.available_qty), 0))
+        .filter(models.StockBatch.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    party_count = (
+        db.query(func.count(models.Party.id))
+        .filter(models.Party.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    customer_count = (
+        db.query(func.count(models.Party.id))
+        .filter(
+            models.Party.owner_account_id == account_id,
+            models.Party.party_type == "customer",
+        )
+        .scalar()
+        or 0
+    )
+    outstanding_count = (
+        db.query(func.count(models.OutstandingBill.id))
+        .filter(models.OutstandingBill.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    outstanding_balance_total = (
+        db.query(func.coalesce(func.sum(models.OutstandingBill.balance), 0.0))
+        .filter(models.OutstandingBill.owner_account_id == account_id)
+        .scalar()
+        or 0.0
+    )
+
+    def _len(col):
+        return func.coalesce(func.length(col), 0)
+
+    # Last synced = newest row per data type
+    products_last = (
+        db.query(func.max(models.Product.created_at))
+        .filter(models.Product.owner_account_id == account_id)
+        .scalar()
+    )
+    batches_last = (
+        db.query(func.max(models.StockBatch.created_at))
+        .filter(models.StockBatch.owner_account_id == account_id)
+        .scalar()
+    )
+    if batches_last and (not products_last or batches_last > products_last):
+        products_last = batches_last
+    parties_last = (
+        db.query(func.max(models.Party.created_at))
+        .filter(models.Party.owner_account_id == account_id)
+        .scalar()
+    )
+    outstanding_last = (
+        db.query(
+            func.max(
+                func.coalesce(
+                    models.OutstandingBill.updated_at,
+                    models.OutstandingBill.uploaded_at,
+                )
+            )
+        )
+        .filter(models.OutstandingBill.owner_account_id == account_id)
+        .scalar()
+    )
+
+    # Approx data size: text column bytes + fixed per-row overhead
+    products_bytes = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    _len(models.Product.name)
+                    + _len(models.Product.product_code)
+                    + _len(models.Product.manufacturer)
+                    + _len(models.Product.pack_size)
+                    + _len(models.Product.hsn_code)
+                    + _len(models.Product.category)
+                    + 120
+                ),
+                0,
+            )
+        )
+        .filter(models.Product.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    batches_bytes = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    _len(models.StockBatch.batch_no)
+                    + _len(models.StockBatch.scheme)
+                    + 100
+                ),
+                0,
+            )
+        )
+        .filter(models.StockBatch.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    parties_bytes = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    _len(models.Party.name)
+                    + _len(models.Party.code)
+                    + _len(models.Party.address)
+                    + _len(models.Party.area)
+                    + _len(models.Party.city)
+                    + _len(models.Party.mobile)
+                    + _len(models.Party.dl_no)
+                    + _len(models.Party.gst_no)
+                    + 120
+                ),
+                0,
+            )
+        )
+        .filter(models.Party.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    outstanding_bytes = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    _len(models.OutstandingBill.party_name)
+                    + _len(models.OutstandingBill.party_id)
+                    + _len(models.OutstandingBill.invoice_no)
+                    + 120
+                ),
+                0,
+            )
+        )
+        .filter(models.OutstandingBill.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+
+    def _mb(n_bytes):
+        return round(float(n_bytes) / (1024 * 1024), 3)
+
+    return schemas.AdminDataSummary(
+        account_id=acc.id,
+        gensoft_code=acc.gensoft_code,
+        name=acc.name,
+        products_last_synced=products_last,
+        parties_last_synced=parties_last,
+        outstanding_last_synced=outstanding_last,
+        products_size_mb=_mb(products_bytes + batches_bytes),
+        parties_size_mb=_mb(parties_bytes),
+        outstanding_size_mb=_mb(outstanding_bytes),
+        product_count=int(product_count),
+        stock_batch_count=int(stock_batch_count),
+        stock_qty_total=int(stock_qty_total),
+        party_count=int(party_count),
+        customer_count=int(customer_count),
+        outstanding_count=int(outstanding_count),
+        outstanding_balance_total=round(float(outstanding_balance_total), 2),
+    )
+
+
+def admin_list_products(
+    db: Session, account_id: int, search: Optional[str] = None, limit: int = 200
+):
+    from sqlalchemy.orm import selectinload
+
+    q = (
+        db.query(models.Product)
+        .options(selectinload(models.Product.stock_batches))
+        .filter(models.Product.owner_account_id == account_id)
+    )
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(like),
+                models.Product.product_code.ilike(like),
+                models.Product.manufacturer.ilike(like),
+            )
+        )
+    products = q.order_by(models.Product.name).limit(limit).all()
+    for p in products:
+        p.total_stock = sum(b.available_qty for b in (p.stock_batches or []))
+    return products
+
+
+def admin_list_parties(
+    db: Session, account_id: int, search: Optional[str] = None, limit: int = 200
+):
+    from sqlalchemy.orm import selectinload
+
+    q = (
+        db.query(models.Party)
+        .options(
+            selectinload(models.Party.linked_account),
+            selectinload(models.Party.sales_rep),
+        )
+        .filter(models.Party.owner_account_id == account_id)
+    )
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Party.name.ilike(like),
+                models.Party.code.ilike(like),
+                models.Party.mobile.ilike(like),
+                models.Party.area.ilike(like),
+            )
+        )
+    parties = q.order_by(models.Party.name).limit(limit).all()
+    for p in parties:
+        p.outstanding_bill_count = _party_outstanding_count(db, account_id, p)
+    return parties
+
+
+def admin_list_outstanding(
+    db: Session, account_id: int, search: Optional[str] = None, limit: int = 200
+):
+    q = db.query(models.OutstandingBill).filter(
+        models.OutstandingBill.owner_account_id == account_id
+    )
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.OutstandingBill.party_name.ilike(like),
+                models.OutstandingBill.party_id.ilike(like),
+                models.OutstandingBill.invoice_no.ilike(like),
+            )
+        )
+    return q.order_by(models.OutstandingBill.invoice_date.desc()).limit(limit).all()
+
+
+def admin_clear_products(db: Session, account_id: int) -> schemas.AdminClearResult:
+    """Delete all products and stock batches for an account."""
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        raise AppError("Account not found")
+
+    product_ids = [
+        p.id
+        for p in db.query(models.Product.id)
+        .filter(models.Product.owner_account_id == account_id)
+        .all()
+    ]
+    batch_count = (
+        db.query(func.count(models.StockBatch.id))
+        .filter(models.StockBatch.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+
+    if product_ids:
+        batch_ids = [
+            b.id
+            for b in db.query(models.StockBatch.id)
+            .filter(models.StockBatch.product_id.in_(product_ids))
+            .all()
+        ]
+        if batch_ids:
+            db.query(models.OrderItem).filter(
+                models.OrderItem.batch_id.in_(batch_ids)
+            ).update({models.OrderItem.batch_id: None}, synchronize_session=False)
+        db.query(models.OrderItem).filter(
+            models.OrderItem.product_id.in_(product_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(models.StockBatch).filter(
+        models.StockBatch.owner_account_id == account_id
+    ).delete(synchronize_session=False)
+    deleted = (
+        db.query(models.Product)
+        .filter(models.Product.owner_account_id == account_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return schemas.AdminClearResult(
+        deleted=int(deleted),
+        message=f"Deleted {deleted} products and {int(batch_count)} stock batches",
+    )
+
+
+def admin_clear_parties(db: Session, account_id: int) -> schemas.AdminClearResult:
+    """Delete all party/customer master rows — blocked while outstanding remains."""
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        raise AppError("Account not found")
+
+    outstanding_n = (
+        db.query(func.count(models.OutstandingBill.id))
+        .filter(models.OutstandingBill.owner_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    if outstanding_n > 0:
+        raise AppError(
+            f"Cannot delete customers — {outstanding_n} outstanding bill(s) still exist. "
+            "Delete all outstanding first, then delete customers."
+        )
+
+    party_ids = [
+        p.id
+        for p in db.query(models.Party.id)
+        .filter(models.Party.owner_account_id == account_id)
+        .all()
+    ]
+    if party_ids:
+        # Orders may still reference parties — unlink only (no outstanding left)
+        db.query(models.Order).filter(models.Order.party_id.in_(party_ids)).update(
+            {models.Order.party_id: None}, synchronize_session=False
+        )
+
+    deleted = (
+        db.query(models.Party)
+        .filter(models.Party.owner_account_id == account_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return schemas.AdminClearResult(
+        deleted=int(deleted),
+        message=f"Deleted {deleted} parties/customers",
+    )
+
+
+def admin_clear_outstanding(db: Session, account_id: int) -> schemas.AdminClearResult:
+    """Delete all outstanding bills for an account."""
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        raise AppError("Account not found")
+    deleted = (
+        db.query(models.OutstandingBill)
+        .filter(models.OutstandingBill.owner_account_id == account_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return schemas.AdminClearResult(
+        deleted=int(deleted),
+        message=f"Deleted {deleted} outstanding bills",
+    )
 
 
 def change_password(

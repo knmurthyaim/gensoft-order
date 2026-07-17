@@ -1,7 +1,7 @@
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import Session
@@ -46,10 +46,11 @@ SAMPLE_ROW = [
 
 @router.get("/accounts", response_model=List[schemas.AdminAccountRow])
 def list_accounts(
+    search: Optional[str] = Query(None, description="Filter by code, name, username, mobile…"),
     db: Session = Depends(get_db),
     _admin=Depends(require_platform_admin),
 ):
-    return crud.list_admin_accounts(db)
+    return crud.list_admin_accounts(db, search=search)
 
 
 @router.get("/accounts/upload/template")
@@ -149,6 +150,18 @@ def update_account(
     return row
 
 
+@router.delete("/accounts/{account_id}")
+def delete_account(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    ok = crud.admin_delete_account(db, account_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"status": "ok", "message": "Account deleted"}
+
+
 @router.put("/users/{user_id}", response_model=schemas.AdminAccountRow)
 def update_user(
     user_id: int,
@@ -163,3 +176,114 @@ def update_user(
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
     return row
+
+
+@router.get("/accounts/{account_id}/data-summary", response_model=schemas.AdminDataSummary)
+def account_data_summary(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    row = crud.admin_account_data_summary(db, account_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return row
+
+
+@router.get("/accounts/{account_id}/products", response_model=List[schemas.Product])
+def list_account_products(
+    account_id: int,
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    if not crud.admin_get_account(db, account_id):
+        raise HTTPException(status_code=404, detail="Account not found")
+    return crud.admin_list_products(db, account_id, search=search)
+
+
+@router.get("/accounts/{account_id}/parties", response_model=List[schemas.Party])
+def list_account_parties(
+    account_id: int,
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    if not crud.admin_get_account(db, account_id):
+        raise HTTPException(status_code=404, detail="Account not found")
+    return crud.admin_list_parties(db, account_id, search=search)
+
+
+@router.get(
+    "/accounts/{account_id}/outstanding",
+    response_model=List[schemas.OutstandingBillRow],
+)
+def list_account_outstanding(
+    account_id: int,
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    if not crud.admin_get_account(db, account_id):
+        raise HTTPException(status_code=404, detail="Account not found")
+    bills = crud.admin_list_outstanding(db, account_id, search=search)
+    return [
+        schemas.OutstandingBillRow(
+            id=b.id,
+            party_id=b.party_id,
+            party_name=b.party_name,
+            invoice_no=b.invoice_no,
+            invoice_date=b.invoice_date,
+            amount=b.amount,
+            paid=b.paid,
+            balance=b.balance,
+            age=b.age,
+            discount=b.discount,
+        )
+        for b in bills
+    ]
+
+
+@router.delete(
+    "/accounts/{account_id}/products",
+    response_model=schemas.AdminClearResult,
+)
+def clear_account_products(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    try:
+        return crud.admin_clear_products(db, account_id)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete(
+    "/accounts/{account_id}/parties",
+    response_model=schemas.AdminClearResult,
+)
+def clear_account_parties(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    try:
+        return crud.admin_clear_parties(db, account_id)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete(
+    "/accounts/{account_id}/outstanding",
+    response_model=schemas.AdminClearResult,
+)
+def clear_account_outstanding(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    try:
+        return crud.admin_clear_outstanding(db, account_id)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

@@ -89,6 +89,7 @@ def upload_customers_json(
 @router.post("/upload/excel", response_model=schemas.BulkUploadResult)
 async def upload_customers_excel(
     file: UploadFile = File(...),
+    replace_all: bool = Query(False),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
@@ -102,7 +103,9 @@ async def upload_customers_excel(
     if not parsed:
         raise HTTPException(status_code=400, detail="No data rows found in Excel file")
     try:
-        return crud.upload_customers_from_excel_rows(db, account, parsed)
+        return crud.upload_customers_from_excel_rows(
+            db, account, parsed, replace_all=replace_all
+        )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -179,5 +182,8 @@ def delete_party(
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    if not crud.delete_party(db, account, party_id):
-        raise HTTPException(status_code=404, detail="Party not found")
+    try:
+        if not crud.delete_party(db, account, party_id):
+            raise HTTPException(status_code=404, detail="Party not found")
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

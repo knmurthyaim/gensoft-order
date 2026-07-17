@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../AuthContext.jsx";
 import Modal from "../components/Modal.jsx";
 import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
+import AdminDataManage from "../components/AdminDataManage.jsx";
 import { admin as adminApi } from "../api";
 
 const emptyForm = {
@@ -22,10 +23,12 @@ const emptyForm = {
 export default function AdminUsers() {
   const { logout } = useAuth();
   const [rows, setRows] = useState([]);
+  const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [userForm, setUserForm] = useState({
     username: "",
@@ -35,17 +38,27 @@ export default function AdminUsers() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [managingData, setManagingData] = useState(null);
   const fileInputRef = useRef(null);
+  const searchTimer = useRef(null);
 
-  const load = () =>
+  const load = (q = search) =>
     adminApi
-      .listAccounts()
+      .listAccounts((q || "").trim() || undefined)
       .then(setRows)
       .catch(() => setError("Failed to load accounts."));
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const onSearchChange = (value) => {
+    setSearch(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => load(value), 280);
+  };
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -54,6 +67,7 @@ export default function AdminUsers() {
   };
 
   const openEdit = (row) => {
+    setViewing(null);
     setEditing(row);
     setForm({
       account_type: row.account.account_type,
@@ -76,6 +90,16 @@ export default function AdminUsers() {
       is_active: row.user_is_active,
     });
     setError("");
+  };
+
+  const openView = async (row) => {
+    setError("");
+    try {
+      const fresh = await adminApi.getAccount(row.account.id);
+      setViewing(fresh);
+    } catch {
+      setViewing(row);
+    }
   };
 
   const saveCreate = async (e) => {
@@ -123,6 +147,30 @@ export default function AdminUsers() {
     }
   };
 
+  const confirmDelete = async (row) => {
+    const code = row.account.gensoft_code;
+    const name = row.account.name;
+    const ok = window.confirm(
+      `Delete customer "${name}" (${code})?\n\n` +
+        "This permanently removes the account, login, products, parties, orders and related data. This cannot be undone."
+    );
+    if (!ok) return;
+    setDeletingId(row.account.id);
+    setError("");
+    try {
+      await adminApi.deleteAccount(row.account.id);
+      setViewing(null);
+      setEditing(null);
+      setNotice(`Deleted ${name} (${code}).`);
+      load();
+      setTimeout(() => setNotice(""), 3000);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not delete account.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -167,7 +215,8 @@ export default function AdminUsers() {
           <div>
             <h1 className="page-title">User Registration &amp; Management</h1>
             <p className="page-sub">
-              Create and edit distributor / retailer login accounts
+              Search by GenSoft code or name — view, edit, delete accounts, or
+              manage products / stock / customers / outstanding
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -201,6 +250,22 @@ export default function AdminUsers() {
 
         {error && <div className="error-banner">{error}</div>}
         {notice && <div className="notice-banner">{notice}</div>}
+
+        <div className="panel" style={{ marginBottom: 12, padding: 12 }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Search customers</label>
+            <input
+              placeholder="GenSoft code, business name, username, mobile, GST, DL…"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+            Showing {rows.length} account{rows.length === 1 ? "" : "s"}
+            {search.trim() ? ` matching “${search.trim()}”` : ""}
+          </div>
+        </div>
 
         <div className="panel">
           <table>
@@ -241,12 +306,32 @@ export default function AdminUsers() {
                         : "disabled"}
                     </span>
                   </td>
-                  <td style={{ textAlign: "right" }}>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      className="btn secondary sm"
+                      onClick={() => openView(r)}
+                    >
+                      View
+                    </button>{" "}
+                    <button
+                      className="btn secondary sm"
+                      onClick={() => setManagingData(r)}
+                    >
+                      Data
+                    </button>{" "}
                     <button
                       className="btn secondary sm"
                       onClick={() => openEdit(r)}
                     >
                       Edit
+                    </button>{" "}
+                    <button
+                      className="btn secondary sm"
+                      disabled={deletingId === r.account.id}
+                      onClick={() => confirmDelete(r)}
+                      style={{ color: "#b91c1c" }}
+                    >
+                      {deletingId === r.account.id ? "…" : "Delete"}
                     </button>
                   </td>
                 </tr>
@@ -254,7 +339,9 @@ export default function AdminUsers() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="empty">
-                    No users registered yet.
+                    {search.trim()
+                      ? "No customers match this search."
+                      : "No users registered yet."}
                   </td>
                 </tr>
               )}
@@ -283,6 +370,40 @@ export default function AdminUsers() {
         </Modal>
       )}
 
+      {viewing && (
+        <Modal
+          title={`Customer — ${viewing.account.name}`}
+          onClose={() => setViewing(null)}
+          wide
+        >
+          <AccountDetail row={viewing} />
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => setViewing(null)}
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              style={{ color: "#b91c1c" }}
+              onClick={() => confirmDelete(viewing)}
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => openEdit(viewing)}
+            >
+              Modify
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {editing && (
         <Modal
           title={`Edit — ${editing.account.name}`}
@@ -290,6 +411,9 @@ export default function AdminUsers() {
           wide
         >
           <form onSubmit={saveEdit}>
+            <div className="muted" style={{ marginBottom: 10 }}>
+              GenSoft code: <strong>{editing.account.gensoft_code}</strong>
+            </div>
             <AccountForm form={form} setForm={setForm} />
             <h3 style={{ fontSize: 15, marginTop: 16 }}>Login Details</h3>
             <div className="form-grid">
@@ -346,12 +470,32 @@ export default function AdminUsers() {
               >
                 Cancel
               </button>
+              <button
+                type="button"
+                className="btn secondary"
+                style={{ color: "#b91c1c" }}
+                onClick={() => confirmDelete(editing)}
+              >
+                Delete
+              </button>
               <button type="submit" className="btn">
                 Save Changes
               </button>
             </div>
           </form>
         </Modal>
+      )}
+
+      {managingData && (
+        <AdminDataManage
+          row={managingData}
+          onClose={() => setManagingData(null)}
+          onNotice={(msg) => {
+            setNotice(msg);
+            setTimeout(() => setNotice(""), 4000);
+          }}
+          onError={(msg) => setError(msg)}
+        />
       )}
 
       {showPassword && (
@@ -363,6 +507,61 @@ export default function AdminUsers() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function AccountDetail({ row }) {
+  const a = row.account;
+  const fields = [
+    ["GenSoft Code", a.gensoft_code],
+    ["Business Name", a.name],
+    ["Account Type", a.account_type],
+    ["Owner Name", a.owner_name || "—"],
+    ["Username", row.username],
+    ["Contact Name", row.user_name || "—"],
+    ["Mobile", a.mobile || "—"],
+    ["Email", a.email || "—"],
+    ["DL No", a.dl_no || "—"],
+    ["GST No", a.gst_no || "—"],
+    ["Area", a.area || "—"],
+    ["City", a.city || "—"],
+    ["Address", a.address || "—"],
+    [
+      "Account Status",
+      a.is_active ? "Active" : "Disabled",
+    ],
+    [
+      "Login Status",
+      row.user_is_active ? "Active" : "Disabled",
+    ],
+  ];
+  return (
+    <div className="form-grid">
+      {fields.map(([label, value]) => (
+        <div
+          key={label}
+          className="field"
+          style={
+            label === "Address" || label === "Business Name"
+              ? { gridColumn: "1 / -1" }
+              : undefined
+          }
+        >
+          <label>{label}</label>
+          <div
+            style={{
+              padding: "8px 10px",
+              background: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: 6,
+              minHeight: 38,
+            }}
+          >
+            {value}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

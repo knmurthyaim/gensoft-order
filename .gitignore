@@ -6,6 +6,12 @@ tools/uploader/venv/
 tools/uploader/build/
 tools/uploader/dist/
 tools/uploader/*.spec
+tools/autosync/venv/
+tools/autosync/build/
+tools/autosync/dist/
+tools/autosync/*.spec
+tools/autosync/gensoft_upload.py
+tools/autosync/config.ini
 __pycache__/
 *.pyc
 .Python

@@ -72,7 +72,8 @@ curl -X POST https://gensoft-order.onrender.com/api/parties/upload \
 **Excel columns:** party_id, party_name, invoice_no, invoice_date, amount, paid, balance, age, discount
 
 - `balance` and `age` are optional (auto-calculated if omitted).
-- `replace_all: true` replaces all existing bills for your account.
+- **Age** is calculated from `invoice_date` on the server (uploaded age is ignored when date is present).
+- `replace_all: true` (JSON body) or `?replace_all=true` (Excel) replaces all existing bills for your account.
 
 ```bash
 curl -X POST https://gensoft-order.onrender.com/api/outstanding/upload \

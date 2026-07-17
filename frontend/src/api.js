@@ -86,11 +86,15 @@ function downloadBlob(r, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-function uploadExcelFile(url, file) {
+function uploadExcelFile(url, file, replaceAll = false) {
   const fd = new FormData();
   fd.append("file", file);
+  const fullUrl = replaceAll ? `${url}?replace_all=true` : url;
   return api
-    .post(url, fd, { headers: { "Content-Type": "multipart/form-data" } })
+    .post(fullUrl, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 30 * 60 * 1000,
+    })
     .then((r) => r.data);
 }
 
@@ -100,19 +104,51 @@ function makeUploadApi(basePath, templateFilename) {
       api
         .get(`${basePath}/upload/template`, { responseType: "blob" })
         .then((r) => downloadBlob(r, templateFilename)),
-    uploadExcel: (file) => uploadExcelFile(`${basePath}/upload/excel`, file),
+    uploadExcel: (file, replaceAll = false) =>
+      uploadExcelFile(`${basePath}/upload/excel`, file, replaceAll),
     uploadJson: (data) => api.post(`${basePath}/upload`, data).then((r) => r.data),
   };
 }
 export const admin = {
-  listAccounts: () => api.get("/admin/accounts").then((r) => r.data),
+  listAccounts: (search) =>
+    api
+      .get("/admin/accounts", { params: search ? { search } : {} })
+      .then((r) => r.data),
   getAccount: (id) => api.get(`/admin/accounts/${id}`).then((r) => r.data),
   createAccount: (data) =>
     api.post("/admin/accounts", data).then((r) => r.data),
   updateAccount: (id, data) =>
     api.put(`/admin/accounts/${id}`, data).then((r) => r.data),
+  deleteAccount: (id) =>
+    api.delete(`/admin/accounts/${id}`).then((r) => r.data),
   updateUser: (id, data) =>
     api.put(`/admin/users/${id}`, data).then((r) => r.data),
+  dataSummary: (id) =>
+    api.get(`/admin/accounts/${id}/data-summary`).then((r) => r.data),
+  listProducts: (id, search) =>
+    api
+      .get(`/admin/accounts/${id}/products`, {
+        params: search ? { search } : {},
+      })
+      .then((r) => r.data),
+  listParties: (id, search) =>
+    api
+      .get(`/admin/accounts/${id}/parties`, {
+        params: search ? { search } : {},
+      })
+      .then((r) => r.data),
+  listOutstanding: (id, search) =>
+    api
+      .get(`/admin/accounts/${id}/outstanding`, {
+        params: search ? { search } : {},
+      })
+      .then((r) => r.data),
+  clearProducts: (id) =>
+    api.delete(`/admin/accounts/${id}/products`).then((r) => r.data),
+  clearParties: (id) =>
+    api.delete(`/admin/accounts/${id}/parties`).then((r) => r.data),
+  clearOutstanding: (id) =>
+    api.delete(`/admin/accounts/${id}/outstanding`).then((r) => r.data),
   downloadTemplate: () =>
     api
       .get("/admin/accounts/upload/template", { responseType: "blob" })

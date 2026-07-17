@@ -1,7 +1,7 @@
 from io import BytesIO
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy.orm import Session
@@ -97,6 +97,7 @@ def upload_products_json(
 @router.post("/upload/excel", response_model=schemas.BulkUploadResult)
 async def upload_products_excel(
     file: UploadFile = File(...),
+    replace_all: bool = Query(False),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
@@ -110,7 +111,9 @@ async def upload_products_excel(
     if not parsed:
         raise HTTPException(status_code=400, detail="No data rows found in Excel file")
     try:
-        return crud.upload_products_from_excel_rows(db, account, parsed)
+        return crud.upload_products_from_excel_rows(
+            db, account, parsed, replace_all=replace_all
+        )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
