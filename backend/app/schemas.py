@@ -525,6 +525,7 @@ class AdminClearResult(BaseModel):
 class BulkUploadResult(BaseModel):
     created: int
     failed: int
+    skipped: int = 0
     errors: List[str] = []
 
 
@@ -606,6 +607,7 @@ class OutstandingBillUpload(BaseModel):
 class OutstandingBillUploadResult(BaseModel):
     uploaded: int
     failed: int
+    skipped: int = 0
     errors: List[str] = []
 
 

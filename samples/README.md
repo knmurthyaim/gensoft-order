@@ -19,7 +19,7 @@ Sample JSON and Excel files for bulk upload from your billing software to the Ge
 
 **Files:** `products_stock_sample.json`, `products_stock_sample.xlsx`
 
-**Excel columns:** product_code, name, manufacturer, pack_size, hsn_code, category, mrp, ptr_rate, pts_rate, gst_pct, batch_no, expiry_date, available_qty, scheme, batch_mrp, batch_ptr_rate
+**Excel columns:** product_code, name, manufacturer, pack_size, hsn_code, category, mrp, ptr_rate, pts_rate, gst_pct, batch_no, expiry_date (month/year e.g. `2027-06` or `06/2027`), available_qty, scheme, batch_mrp, batch_ptr_rate
 
 One row per product **batch**. Repeat product_code/name for multiple batches of the same product.
 
@@ -75,6 +75,18 @@ curl -X POST https://gensoft-order.onrender.com/api/parties/upload \
 - **Age** is calculated from `invoice_date` on the server (uploaded age is ignored when date is present).
 - `replace_all: true` (JSON body) or `?replace_all=true` (Excel) replaces all existing bills for your account.
 
+**`invoice_date` formats (important):**
+
+| How to enter in Excel | Example |
+|----------------------|---------|
+| Excel **Date** cell (recommended) | Format cells → Date → `DD-MM-YYYY` |
+| Text `DD-MM-YYYY` | `25-05-2026` |
+| Text `DD/MM/YYYY` | `25/05/2026` |
+| Text `YYYY-MM-DD` | `2026-05-25` |
+
+Avoid US style `MM/DD/YYYY` (e.g. `05/25/2026`) — day and month get swapped.  
+If the date shows as a number like `45802`, format that column as **Date** before upload (or leave it — the API now reads Excel serial dates too).
+
 ```bash
 curl -X POST https://gensoft-order.onrender.com/api/outstanding/upload \
   -H "Authorization: Bearer YOUR_TOKEN" \
@@ -94,6 +106,7 @@ curl -X POST https://gensoft-order.onrender.com/api/outstanding/upload \
 
 - All uploads are scoped to the logged-in distributor account.
 - `replace_all: false` (default) upserts by product code, party code, or invoice+party.
-- Date format: `YYYY-MM-DD` or `DD-MM-YYYY`.
+- Outstanding date: prefer Excel Date cells or `DD-MM-YYYY` / `YYYY-MM-DD` text.
+- Stock expiry: month/year only (`2027-06` or `06/2027`).
 
 Regenerate Excel samples: `python generate_samples.py` (from this folder).

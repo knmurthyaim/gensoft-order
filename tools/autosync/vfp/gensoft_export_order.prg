@@ -1,26 +1,22 @@
 * GenSoft Order — VFP 6 export helper
-* Creates TAB-delimited text files that GenSoftAutoSync converts + uploads to cloud.
+* Write files into the SAME folder as GenSoftSync.exe
+* (run_vfp_export.bat does: cd to that folder before DO this PRG)
 *
-* REQUIRED: set paths and open your live tables / SELECT the columns as shown.
-* Then from VFP:  DO gensoft_export_order
-*
-* Output folder (must match Auto Sync "Export folder"):
-*   C:\GenSoftExports\customers.txt
-*   C:\GenSoftExports\products_stock.txt
-*   C:\GenSoftExports\outstanding.txt
+* Output (same software folder):
+*   customers.txt  / customers.xlsx
+*   products_stock.txt
+*   outstanding.txt
 *
 * Column names must stay exactly as below (first row = headers).
 
 LOCAL lcOut
-lcOut = "C:\GenSoftExports\"
+* Current folder = software folder (where GenSoftSync.exe lives)
+lcOut = ADDBS(SYS(5) + SYS(2003))
 IF NOT DIRECTORY(lcOut)
     MD (lcOut)
 ENDIF
 
 * ---- 1) CUSTOMERS / PARTIES ----
-* Adjust USE / SELECT fields to match YOUR VFP party DBF names.
-* Example assumes a table PARTY with common GenSoft fields — rename as needed.
-
 * USE party IN 0 SHARED
 * SELECT ;
 *     ALLTRIM(code) AS code, ;
@@ -56,8 +52,9 @@ ENDIF
 * Header row:
 * party_id, party_name, invoice_no, invoice_date, amount, paid, balance, age, discount
 
-MESSAGEBOX("Edit this PRG to USE your live DBFs, then COPY TO C:\GenSoftExports\*.txt" + CHR(13) + ;
-    "After that, GenSoft Auto Sync (source = Run EXE / VFP) will upload automatically.", ;
+MESSAGEBOX("Edit this PRG to USE your live DBFs, then COPY TO:" + CHR(13) + ;
+    lcOut + "customers.txt / products_stock.txt / outstanding.txt" + CHR(13) + ;
+    "GenSoftSync.exe (same folder) will upload and delete after success.", ;
     64, "GenSoft VFP export")
 
 RETURN

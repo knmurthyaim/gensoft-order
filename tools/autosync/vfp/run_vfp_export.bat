@@ -1,16 +1,23 @@
 @echo off
-REM Sample: call your VFP-built export EXE, then leave files in C:\GenSoftExports
-REM Point GenSoft Auto Sync [external] command = this BAT file.
+REM ============================================================
+REM Put this BAT in the SAME folder as GenSoftSync.exe
+REM Your PRG should write Excel files into THIS folder (%~dp0).
+REM ============================================================
 
-set OUT=C:\GenSoftExports
-if not exist "%OUT%" mkdir "%OUT%"
+cd /d "%~dp0"
+set OUT=%~dp0
 
-REM --- Option A: your billing EXE that already creates the three files ---
-REM "C:\YourBilling\ExportToGenSoft.exe" "%OUT%"
+REM --- EDIT THESE TWO LINES ---
+set VFP6="C:\Program Files (x86)\Microsoft Visual Studio\VFP98\VFP6.EXE"
+set PRG=C:\YourBilling\gensoft_export_order.prg
 
-REM --- Option B: run VFP 6 with the export PRG (edit path to VFP6.EXE) ---
-REM "C:\Program Files (x86)\Microsoft Visual Studio\VFP98\VFP6.EXE" -C"C:\GenSoft\config.fpw" DO C:\path\to\gensoft_export_order.prg
+REM Run the PRG (closes when done)
+%VFP6% -C DO %PRG%
 
-echo Place customers.xlsx / products_stock.xlsx / outstanding.xlsx (or .txt) in %OUT%
-echo Then Auto Sync will upload them.
+if errorlevel 1 (
+  echo VFP export failed
+  exit /b 1
+)
+
+echo Export done. Files should be in %OUT%
 exit /b 0

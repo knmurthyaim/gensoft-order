@@ -11,7 +11,8 @@ def normalize_header(h: str) -> str:
         "business_name": "name",
         "businessname": "name",
         "customer_name": "name",
-        "party_name": "name",
+        # keep party_name as party_name (needed for outstanding);
+        # customers upload also accepts party_name via row.get fallback
         "party_code": "code",
         "customer_code": "code",
         "customer_id": "party_id",

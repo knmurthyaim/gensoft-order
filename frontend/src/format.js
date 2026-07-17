@@ -36,6 +36,58 @@ export const fmtDate = (d) => {
   });
 };
 
+/** Stock expiry — month + year only (no day). e.g. Jun-2027 */
+export const fmtExpiry = (d) => {
+  if (!d) return "—";
+  const s = String(d).trim();
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (m) {
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const mi = Number(m[2]) - 1;
+    if (mi < 0 || mi > 11) return "—";
+    return `${months[mi]}-${m[1]}`;
+  }
+  const dt = parseApiDate(d);
+  if (!dt) return "—";
+  return dt.toLocaleDateString("en-IN", {
+    month: "short",
+    year: "numeric",
+    timeZone: INDIA_TZ,
+  }).replace(" ", "-");
+};
+
+/** Value for <input type="month"> from API date (YYYY-MM-DD → YYYY-MM). */
+export const toExpiryMonthInput = (d) => {
+  if (!d) return "";
+  const m = String(d).trim().match(/^(\d{4})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}` : "";
+};
+
+/** Convert month input YYYY-MM → API date as last day of that month. */
+export const fromExpiryMonthInput = (ym) => {
+  if (!ym) return null;
+  const m = String(ym).trim().match(/^(\d{4})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  const last = new Date(y, mo, 0).getDate();
+  return `${m[1]}-${m[2]}-${String(last).padStart(2, "0")}`;
+};
+
 export const fmtTime = (d) => {
   const dt = parseApiDate(d);
   if (!dt) return "";

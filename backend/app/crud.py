@@ -863,7 +863,10 @@ def create_batch(db: Session, account: models.Account, data: schemas.StockBatchC
     product = get_product(db, account, data.product_id)
     if not product:
         raise AppError("Product not found")
-    obj = models.StockBatch(owner_account_id=account.id, **data.model_dump())
+    payload = data.model_dump()
+    if payload.get("expiry_date"):
+        payload["expiry_date"] = _month_end(payload["expiry_date"])
+    obj = models.StockBatch(owner_account_id=account.id, **payload)
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -875,6 +878,8 @@ def update_batch(db: Session, account, batch_id, data: schemas.StockBatchUpdate)
     if not obj:
         return None
     for k, v in data.model_dump(exclude_unset=True).items():
+        if k == "expiry_date" and v is not None:
+            v = _month_end(v)
         setattr(obj, k, v)
     db.commit()
     db.refresh(obj)
@@ -2152,6 +2157,99 @@ def _bill_age(invoice_date: Optional[date], age: Optional[int] = None) -> int:
     return 0
 
 
+def _norm_txt(v) -> str:
+    if v is None:
+        return ""
+    return str(v).strip()
+
+
+def _same_num(a, b, places: int = 4) -> bool:
+    try:
+        return round(float(a or 0), places) == round(float(b or 0), places)
+    except (TypeError, ValueError):
+        return False
+
+
+def _party_payload_unchanged(party: models.Party, payload: dict) -> bool:
+    checks = (
+        ("code", _norm_txt),
+        ("name", _norm_txt),
+        ("party_type", _norm_txt),
+        ("address", _norm_txt),
+        ("area", _norm_txt),
+        ("city", _norm_txt),
+        ("mobile", _norm_txt),
+        ("dl_no", _norm_txt),
+        ("gst_no", _norm_txt),
+        ("pricing_model", _norm_txt),
+    )
+    for key, norm in checks:
+        if norm(getattr(party, key, None)) != norm(payload.get(key)):
+            return False
+    if (party.sales_rep_id or None) != (payload.get("sales_rep_id") or None):
+        return False
+    return True
+
+
+def _product_payload_unchanged(product: models.Product, payload: dict) -> bool:
+    text_keys = (
+        "product_code",
+        "name",
+        "manufacturer",
+        "pack_size",
+        "hsn_code",
+        "category",
+        "schedule",
+    )
+    for key in text_keys:
+        if _norm_txt(getattr(product, key, None)) != _norm_txt(payload.get(key)):
+            return False
+    for key in ("mrp", "ptr_rate", "pts_rate", "special_rate", "gst_pct"):
+        if not _same_num(getattr(product, key, 0), payload.get(key, 0)):
+            return False
+    if bool(getattr(product, "is_on_hold", False)) != bool(
+        payload.get("is_on_hold", False)
+    ):
+        return False
+    return True
+
+
+def _batch_payload_unchanged(batch: models.StockBatch, bdata: dict) -> bool:
+    if _norm_txt(batch.batch_no) != _norm_txt(bdata.get("batch_no")):
+        return False
+    if _norm_txt(batch.scheme) != _norm_txt(bdata.get("scheme")):
+        return False
+    if (batch.expiry_date or None) != (bdata.get("expiry_date") or None):
+        return False
+    if int(batch.available_qty or 0) != int(bdata.get("available_qty") or 0):
+        return False
+    for key in ("mrp", "ptr_rate", "pts_rate"):
+        if not _same_num(getattr(batch, key, 0), bdata.get(key, 0)):
+            return False
+    if bool(batch.show_to_customer) != bool(bdata.get("show_to_customer", True)):
+        return False
+    return True
+
+
+def _bill_payload_unchanged(bill: models.OutstandingBill, payload: dict) -> bool:
+    if _norm_txt(bill.party_id) != _norm_txt(payload.get("party_id")):
+        return False
+    if _norm_txt(bill.party_name) != _norm_txt(payload.get("party_name")):
+        return False
+    if _norm_txt(bill.invoice_no) != _norm_txt(payload.get("invoice_no")):
+        return False
+    if (bill.invoice_date or None) != (payload.get("invoice_date") or None):
+        return False
+    if (bill.party_ref_id or None) != (payload.get("party_ref_id") or None):
+        return False
+    for key in ("amount", "paid", "balance", "discount"):
+        if not _same_num(getattr(bill, key, 0), payload.get(key, 0), places=2):
+            return False
+    if int(bill.age or 0) != int(payload.get("age") or 0):
+        return False
+    return True
+
+
 def upload_outstanding_bills(
     db: Session,
     account: models.Account,
@@ -2162,12 +2260,9 @@ def upload_outstanding_bills(
 
     uploaded = 0
     failed = 0
+    skipped = 0
     errors: List[str] = []
-
-    if data.replace_all:
-        db.query(models.OutstandingBill).filter(
-            models.OutstandingBill.owner_account_id == account.id
-        ).delete(synchronize_session=False)
+    seen_keys: set[tuple[str, str]] = set()
 
     for i, item in enumerate(data.bills, start=1):
         try:
@@ -2178,29 +2273,30 @@ def upload_outstanding_bills(
 
             balance = item.balance
             if balance is None:
-                balance = max(
-                    item.amount - item.paid - item.discount, 0.0
-                )
+                balance = max(item.amount - item.paid - item.discount, 0.0)
             age = _bill_age(item.invoice_date, item.age)
             party_ref = _resolve_party_ref(
                 db, account.id, item.party_id.strip(), item.party_name
             )
+            inv = item.invoice_no.strip()
+            pid = item.party_id.strip()
+            seen_keys.add((inv, pid))
 
             existing = (
                 db.query(models.OutstandingBill)
                 .filter(
                     models.OutstandingBill.owner_account_id == account.id,
-                    models.OutstandingBill.invoice_no == item.invoice_no.strip(),
-                    models.OutstandingBill.party_id == item.party_id.strip(),
+                    models.OutstandingBill.invoice_no == inv,
+                    models.OutstandingBill.party_id == pid,
                 )
                 .first()
             )
             payload = dict(
                 owner_account_id=account.id,
                 party_ref_id=party_ref,
-                party_id=item.party_id.strip(),
+                party_id=pid,
                 party_name=item.party_name.strip(),
-                invoice_no=item.invoice_no.strip(),
+                invoice_no=inv,
                 invoice_date=item.invoice_date,
                 amount=round(item.amount, 2),
                 paid=round(item.paid, 2),
@@ -2209,6 +2305,9 @@ def upload_outstanding_bills(
                 discount=round(item.discount, 2),
             )
             if existing:
+                if _bill_payload_unchanged(existing, payload):
+                    skipped += 1
+                    continue
                 for k, v in payload.items():
                     if k != "owner_account_id":
                         setattr(existing, k, v)
@@ -2219,26 +2318,105 @@ def upload_outstanding_bills(
             failed += 1
             errors.append(f"Row {i}: {exc}")
 
+    # Full dump: remove bills that are no longer in the file
+    if data.replace_all and seen_keys:
+        existing_bills = (
+            db.query(models.OutstandingBill)
+            .filter(models.OutstandingBill.owner_account_id == account.id)
+            .all()
+        )
+        for bill in existing_bills:
+            key = (_norm_txt(bill.invoice_no), _norm_txt(bill.party_id))
+            if key not in seen_keys:
+                db.delete(bill)
+
     db.commit()
     return schemas.OutstandingBillUploadResult(
-        uploaded=uploaded, failed=failed, errors=errors
+        uploaded=uploaded, failed=failed, skipped=skipped, errors=errors
     )
 
 
 def _parse_upload_date(val) -> Optional[date]:
+    """Parse invoice/other dates from Excel or text.
+
+    Accepts:
+    - Python date/datetime (Excel date cells via openpyxl)
+    - Excel serial numbers (e.g. 45802)
+    - Text: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY, and with time
+    """
     if val is None or val == "":
         return None
-    if isinstance(val, date):
-        return val
     if isinstance(val, datetime):
         return val.date()
+    if isinstance(val, date):
+        return val
+    # Excel serial date (number) — common when cell is General but holds a date value
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        serial = float(val)
+        if 20000 <= serial <= 80000:  # ~1954–2119
+            try:
+                from openpyxl.utils.datetime import from_excel
+
+                dt = from_excel(serial)
+                return dt.date() if isinstance(dt, datetime) else dt
+            except Exception:
+                pass
+        return None
+
     text = str(val).strip()
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+    if not text:
+        return None
+    # "2026-05-25 00:00:00" / ISO with time
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    elif " " in text and text[0].isdigit():
+        text = text.split()[0]
+
+    for fmt in (
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y",
+        "%d.%m.%Y",
+        "%Y/%m/%d",
+        "%d-%m-%y",
+        "%d/%m/%y",
+        "%d.%m.%y",
+        "%d-%b-%Y",
+        "%d-%b-%y",
+        "%d %b %Y",
+        "%d %B %Y",
+    ):
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
     return None
+
+
+def _month_end(d: date) -> date:
+    """Normalize expiry to the last day of that month."""
+    if d.month == 12:
+        return date(d.year, 12, 31)
+    return date(d.year, d.month + 1, 1) - timedelta(days=1)
+
+
+def _parse_expiry_date(val) -> Optional[date]:
+    """Stock expiry: month+year only. Accepts YYYY-MM, MM/YYYY, or full dates → month-end."""
+    if val is None or val == "":
+        return None
+    if isinstance(val, datetime):
+        return _month_end(val.date())
+    if isinstance(val, date):
+        return _month_end(val)
+    text = str(val).strip()
+    for fmt in ("%Y-%m", "%m/%Y", "%m-%Y", "%b-%Y", "%b/%Y", "%B-%Y", "%B/%Y"):
+        try:
+            parsed = datetime.strptime(text, fmt).date()
+            return _month_end(parsed)
+        except ValueError:
+            continue
+    full = _parse_upload_date(text)
+    return _month_end(full) if full else None
 
 
 def _require_distributor(account: models.Account):
@@ -2254,22 +2432,10 @@ def upload_products_with_stock(
     _require_distributor(account)
     created = 0
     failed = 0
+    skipped = 0
     errors: List[str] = []
-
-    if data.replace_all:
-        product_ids = [
-            p.id
-            for p in db.query(models.Product)
-            .filter(models.Product.owner_account_id == account.id)
-            .all()
-        ]
-        if product_ids:
-            db.query(models.StockBatch).filter(
-                models.StockBatch.owner_account_id == account.id
-            ).delete(synchronize_session=False)
-            db.query(models.Product).filter(
-                models.Product.owner_account_id == account.id
-            ).delete(synchronize_session=False)
+    seen_product_ids: set[int] = set()
+    seen_batch_keys: set[tuple[int, str]] = set()
 
     for i, item in enumerate(data.products, start=1):
         try:
@@ -2296,20 +2462,25 @@ def upload_products_with_stock(
                     .first()
                 )
             payload = item.model_dump(exclude={"batches"})
+            touched = False
             if product:
-                for k, v in payload.items():
-                    setattr(product, k, v)
+                if not _product_payload_unchanged(product, payload):
+                    for k, v in payload.items():
+                        setattr(product, k, v)
+                    touched = True
             else:
-                product = models.Product(
-                    owner_account_id=account.id, **payload
-                )
+                product = models.Product(owner_account_id=account.id, **payload)
                 db.add(product)
                 db.flush()
+                touched = True
             if not product.product_code:
                 product.product_code = code or f"P{product.id:04d}"
+                touched = True
+            seen_product_ids.add(product.id)
 
             for batch_item in item.batches:
                 batch_no = batch_item.batch_no.strip() or "DEFAULT"
+                seen_batch_keys.add((product.id, batch_no))
                 batch = (
                     db.query(models.StockBatch)
                     .filter(
@@ -2320,6 +2491,7 @@ def upload_products_with_stock(
                     .first()
                 )
                 bdata = batch_item.model_dump()
+                bdata["batch_no"] = batch_no
                 bdata["mrp"] = bdata["mrp"] if bdata["mrp"] is not None else product.mrp
                 bdata["ptr_rate"] = (
                     bdata["ptr_rate"] if bdata["ptr_rate"] is not None else product.ptr_rate
@@ -2327,9 +2499,14 @@ def upload_products_with_stock(
                 bdata["pts_rate"] = (
                     bdata["pts_rate"] if bdata["pts_rate"] is not None else product.pts_rate
                 )
+                if bdata.get("expiry_date"):
+                    bdata["expiry_date"] = _month_end(bdata["expiry_date"])
                 if batch:
+                    if _batch_payload_unchanged(batch, bdata):
+                        continue
                     for k, v in bdata.items():
                         setattr(batch, k, v)
+                    touched = True
                 else:
                     db.add(
                         models.StockBatch(
@@ -2338,13 +2515,41 @@ def upload_products_with_stock(
                             **bdata,
                         )
                     )
-            created += 1
+                    touched = True
+
+            if touched:
+                created += 1
+            else:
+                skipped += 1
         except Exception as exc:
             failed += 1
             errors.append(f"Product row {i}: {exc}")
 
-    db.commit()
-    return schemas.BulkUploadResult(created=created, failed=failed, errors=errors)
+    if data.replace_all and seen_product_ids:
+        for batch in (
+            db.query(models.StockBatch)
+            .filter(models.StockBatch.owner_account_id == account.id)
+            .all()
+        ):
+            key = (batch.product_id, _norm_txt(batch.batch_no) or "DEFAULT")
+            if key not in seen_batch_keys:
+                db.delete(batch)
+        for product in (
+            db.query(models.Product)
+            .filter(models.Product.owner_account_id == account.id)
+            .all()
+        ):
+            if product.id not in seen_product_ids:
+                db.delete(product)
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise AppError(f"Could not save products: {exc}") from exc
+    return schemas.BulkUploadResult(
+        created=created, failed=failed, skipped=skipped, errors=errors
+    )
 
 
 def upload_products_from_excel_rows(
@@ -2382,7 +2587,7 @@ def upload_products_from_excel_rows(
         grouped[key].batches.append(
             schemas.ProductBatchUploadItem(
                 batch_no=str(row.get("batch_no", "")).strip(),
-                expiry_date=_parse_upload_date(row.get("expiry_date")),
+                expiry_date=_parse_expiry_date(row.get("expiry_date")),
                 available_qty=int(float(qty or 0)),
                 scheme=str(row.get("scheme", "")).strip(),
                 mrp=float(row.get("batch_mrp", row.get("mrp", 0)) or 0) or None,
@@ -2408,12 +2613,9 @@ def upload_customers(
     _require_distributor(account)
     created = 0
     failed = 0
+    skipped = 0
     errors: List[str] = []
-
-    if data.replace_all:
-        db.query(models.Party).filter(
-            models.Party.owner_account_id == account.id
-        ).delete(synchronize_session=False)
+    seen_ids: set[int] = set()
 
     for i, item in enumerate(data.customers, start=1):
         try:
@@ -2455,17 +2657,58 @@ def upload_customers(
             payload = item.model_dump(exclude={"sales_rep_name"})
             payload["sales_rep_id"] = rep_id
             if party:
+                if _party_payload_unchanged(party, payload):
+                    seen_ids.add(party.id)
+                    skipped += 1
+                    continue
                 for k, v in payload.items():
                     setattr(party, k, v)
+                seen_ids.add(party.id)
             else:
-                db.add(models.Party(owner_account_id=account.id, **payload))
+                party = models.Party(owner_account_id=account.id, **payload)
+                db.add(party)
+                db.flush()
+                seen_ids.add(party.id)
             created += 1
         except Exception as exc:
             failed += 1
             errors.append(f"Customer row {i}: {exc}")
 
-    db.commit()
-    return schemas.BulkUploadResult(created=created, failed=failed, errors=errors)
+    # Full dump: remove parties not in this file (unlink FKs first)
+    if data.replace_all and seen_ids:
+        stale = (
+            db.query(models.Party)
+            .filter(
+                models.Party.owner_account_id == account.id,
+                ~models.Party.id.in_(seen_ids),
+            )
+            .all()
+        )
+        stale_ids = [p.id for p in stale]
+        if stale_ids:
+            db.query(models.OutstandingBill).filter(
+                models.OutstandingBill.party_ref_id.in_(stale_ids)
+            ).update(
+                {models.OutstandingBill.party_ref_id: None},
+                synchronize_session=False,
+            )
+            db.query(models.Order).filter(
+                models.Order.party_id.in_(stale_ids)
+            ).update(
+                {models.Order.party_id: None},
+                synchronize_session=False,
+            )
+            for p in stale:
+                db.delete(p)
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise AppError(f"Could not save customers: {exc}") from exc
+    return schemas.BulkUploadResult(
+        created=created, failed=failed, skipped=skipped, errors=errors
+    )
 
 
 def upload_customers_from_excel_rows(
@@ -2475,30 +2718,60 @@ def upload_customers_from_excel_rows(
     replace_all: bool = False,
 ) -> schemas.BulkUploadResult:
     customers = []
-    for row in rows:
-        name = str(row.get("name", "")).strip()
-        if not name:
-            continue
-        customers.append(
-            schemas.CustomerUploadItem(
-                code=str(row.get("code", "")).strip(),
-                name=name,
-                party_type=str(row.get("party_type", "customer")).strip() or "customer",
-                address=str(row.get("address", "")).strip(),
-                area=str(row.get("area", "")).strip(),
-                city=str(row.get("city", "Hyderabad")).strip() or "Hyderabad",
-                mobile=str(row.get("mobile", "")).strip(),
-                dl_no=str(row.get("dl_no", "")).strip(),
-                gst_no=str(row.get("gst_no", "")).strip(),
-                sales_rep_name=str(row.get("sales_rep_name", "")).strip(),
-                pricing_model=str(row.get("pricing_model", "PTR")).strip() or "PTR",
+    errors: List[str] = []
+    for i, row in enumerate(rows, start=1):
+        try:
+            name = str(
+                row.get("name")
+                or row.get("party_name")
+                or row.get("customer_name")
+                or ""
+            ).strip()
+            if not name or name.lower() == "none":
+                continue
+            code = str(
+                row.get("code") or row.get("party_code") or row.get("customer_code") or ""
+            ).strip()
+            if code.lower() == "none":
+                code = ""
+            customers.append(
+                schemas.CustomerUploadItem(
+                    code=code,
+                    name=name,
+                    party_type=str(row.get("party_type", "customer") or "customer").strip()
+                    or "customer",
+                    address=str(row.get("address", "") or "").strip(),
+                    area=str(row.get("area", "") or "").strip(),
+                    city=str(row.get("city", "Hyderabad") or "Hyderabad").strip()
+                    or "Hyderabad",
+                    mobile=str(row.get("mobile", "") or "").strip(),
+                    dl_no=str(row.get("dl_no", "") or "").strip(),
+                    gst_no=str(row.get("gst_no", "") or "").strip(),
+                    sales_rep_name=str(row.get("sales_rep_name", "") or "").strip(),
+                    pricing_model=str(row.get("pricing_model", "PTR") or "PTR").strip()
+                    or "PTR",
+                )
             )
+        except Exception as exc:
+            errors.append(f"Excel row {i}: {exc}")
+    if not customers and errors:
+        raise AppError(
+            "No valid customer rows. " + "; ".join(errors[:5])
         )
-    return upload_customers(
+    if not customers:
+        raise AppError(
+            "No customer rows found. Excel needs a 'name' (or party_name) column "
+            "with data. Download the customers template for the correct headers."
+        )
+    result = upload_customers(
         db,
         account,
         schemas.CustomerUpload(replace_all=replace_all, customers=customers),
     )
+    if errors:
+        result.errors = errors + list(result.errors or [])
+        result.failed = int(result.failed or 0) + len(errors)
+    return result
 
 
 def upload_outstanding_from_excel_rows(

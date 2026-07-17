@@ -1,4 +1,5 @@
 from io import BytesIO
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -29,7 +30,7 @@ OUTSTANDING_SAMPLE_ROW = [
     "R001",
     "Sri Dattha Central Pharmacy",
     "INV-24001",
-    "2026-05-25",
+    date(2026, 5, 25),  # real Excel date — format DD-MM-YYYY
     25000,
     8000,
     17000,
@@ -58,6 +59,16 @@ def download_outstanding_template(
     ws.title = "Outstanding"
     ws.append(OUTSTANDING_EXCEL_HEADERS)
     ws.append(OUTSTANDING_SAMPLE_ROW)
+    for row in ws.iter_rows(min_row=2, min_col=4, max_col=4):
+        for cell in row:
+            cell.number_format = "DD-MM-YYYY"
+    ws.append([])
+    ws.append(
+        [
+            "NOTE:",
+            "invoice_date = Excel Date cell, or text DD-MM-YYYY / YYYY-MM-DD (example 25-05-2026)",
+        ]
+    )
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -104,3 +115,8 @@ async def upload_outstanding_excel(
         )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Outstanding upload failed: {exc}"
+        ) from exc

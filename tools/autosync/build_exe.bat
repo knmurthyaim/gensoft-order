@@ -1,5 +1,6 @@
 @echo off
 cd /d "%~dp0"
+
 if not exist venv (
   python -m venv venv
 )
@@ -9,23 +10,30 @@ pip install -r ..\uploader\requirements.txt
 
 copy /Y ..\uploader\gensoft_upload.py .\gensoft_upload.py >nul
 
-pyinstaller --noconfirm --onefile --windowed --name GenSoftAutoSync ^
+echo Building GenSoftSync.exe (one file)...
+pyinstaller --noconfirm --onefile --windowed --name GenSoftSync ^
   --paths . ^
-  --add-data "vfp;vfp" ^
-  --hidden-import=pyodbc ^
   --hidden-import=openpyxl ^
   --hidden-import=requests ^
-  --hidden-import=export_lamrin ^
   --hidden-import=export_files ^
   --hidden-import=gensoft_upload ^
   gensoft_autosync.py
 
 if exist dist (
   copy /Y config.example.ini dist\config.ini >nul
-  xcopy /E /I /Y vfp dist\vfp >nul
+  copy /Y vfp\run_vfp_export.bat dist\run_vfp_export.bat >nul
+  echo.
+  echo ========================================
+  echo  DONE — put ALL of these in ONE folder:
+  echo    GenSoftSync.exe
+  echo    config.ini
+  echo    run_vfp_export.bat
+  echo  Excel files are created in that same folder.
+  echo ========================================
+  echo.
+  echo 1. Edit config.ini  (username, password)
+  echo 2. Edit run_vfp_export.bat  (VFP6 path + your .PRG path)
+  echo 3. Run GenSoftSync.exe → Start with Windows
 )
 
-echo.
-echo EXE: dist\GenSoftAutoSync.exe
-echo Edit dist\config.ini — set source=external and [external] command to your VFP EXE/BAT.
 pause

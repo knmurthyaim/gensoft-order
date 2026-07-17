@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import Modal from "../components/Modal.jsx";
 import { batches, products as prodApi } from "../api";
-import { fmtDate, inr } from "../format";
+import {
+  fmtExpiry,
+  fromExpiryMonthInput,
+  inr,
+  toExpiryMonthInput,
+} from "../format";
 
 const empty = {
   product_id: "",
@@ -42,7 +47,10 @@ export default function Stock() {
 
   const openEdit = (b) => {
     setEditing(b);
-    setForm({ ...b, expiry_date: b.expiry_date || "" });
+    setForm({
+      ...b,
+      expiry_date: toExpiryMonthInput(b.expiry_date),
+    });
     setError("");
     setShowModal(true);
   };
@@ -64,7 +72,7 @@ export default function Stock() {
       const payload = {
         product_id: parseInt(form.product_id, 10),
         batch_no: form.batch_no,
-        expiry_date: form.expiry_date || null,
+        expiry_date: fromExpiryMonthInput(form.expiry_date),
         available_qty: parseInt(form.available_qty, 10) || 0,
         scheme: form.scheme,
         mrp: parseFloat(form.mrp) || 0,
@@ -108,7 +116,7 @@ export default function Stock() {
           <h1 className="page-title">Stock / Batches</h1>
           <p className="page-sub">
             Batch-wise inventory. Toggle "Show" to share a batch with connected
-            customers.
+            customers. Expiry is month &amp; year only.
           </p>
         </div>
         <button className="btn" onClick={openCreate}>
@@ -141,7 +149,7 @@ export default function Stock() {
                 </td>
                 <td>{b.batch_no || "—"}</td>
                 <td className={nearExpiry(b.expiry_date) ? "low-stock" : ""}>
-                  {fmtDate(b.expiry_date)}
+                  {fmtExpiry(b.expiry_date)}
                 </td>
                 <td className={b.available_qty < 10 ? "low-stock" : ""}>
                   {b.available_qty}
@@ -209,9 +217,9 @@ export default function Stock() {
                 />
               </div>
               <div className="field">
-                <label>Expiry Date</label>
+                <label>Expiry (Month / Year)</label>
                 <input
-                  type="date"
+                  type="month"
                   value={form.expiry_date}
                   onChange={(e) =>
                     setForm({ ...form, expiry_date: e.target.value })

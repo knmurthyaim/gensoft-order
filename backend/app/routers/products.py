@@ -116,6 +116,11 @@ async def upload_products_excel(
         )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Products upload failed: {exc}"
+        ) from exc
 
 
 @router.get("/{product_id}", response_model=schemas.Product)

@@ -1,47 +1,88 @@
-# GenSoft Auto Sync
+# GenSoft Sync — one software folder
 
-Windows agent: export local billing data → Excel → upload to Render.
-Supports **Visual FoxPro 6** via an export EXE/BAT (recommended), a folder of files, or optional SQL.
+Put **everything in one folder** (example `C:\GenSoftSync\`):
 
-## For VFP6 (your case)
+```
+C:\GenSoftSync\
+  GenSoftSync.exe      ← the app
+  config.ini           ← settings
+  run_vfp_export.bat   ← runs your VFP PRG
+  customers.xlsx       ← created by PRG, deleted after upload OK
+  products_stock.xlsx
+  outstanding.xlsx
+```
 
-Your DBFs are not SQL. Use this flow:
+No separate export folder.
 
-1. Build / use a small VFP program (or EXE) that `COPY TO` these files into `C:\GenSoftExports\`:
-   - `customers.txt` (or `.xlsx`)
-   - `products_stock.txt` (or `.xlsx`)
-   - `outstanding.txt` (or `.xlsx`)
-2. Sample PRG/BAT: `tools/autosync/vfp/`
-3. In Auto Sync choose **VFP / Run EXE**, browse to that EXE or BAT
-4. **Install start with Windows**
+---
 
-Expected column headers are listed in `vfp/gensoft_export_order.prg`.
+## What it does
 
-Auto Sync converts `.txt`/`.csv` → `.xlsx` and uploads to `https://gensoft-order.onrender.com`.
+1. Starts with Windows (optional)
+2. Every **N minutes**:
+   - Runs `run_vfp_export.bat` (or your EXE) in this folder
+   - Uploads Excel files found in this folder
+   - **Deletes each file only after that upload succeeds**
 
-## Data source modes
+---
 
-| Mode | Behaviour |
-|------|-----------|
-| **VFP / Run EXE** | Runs your command, then uploads files from export folder |
-| **Folder only** | Uploads existing files (no EXE) |
-| **SQL Server** | Reads Lamrin SQL (only if you migrate off VFP) |
+## Setup
 
-## Quick start
+### 1. Build
 
 ```bat
 cd tools\autosync
-copy config.example.ini config.ini
-notepad config.ini
-python gensoft_autosync.py
-```
-
-Or run `dist\GenSoftAutoSync.exe` after `build_exe.bat`.
-
-## Build EXE
-
-```bat
 build_exe.bat
 ```
 
-Ship `GenSoftAutoSync.exe` + `config.ini` + (optional) your VFP export EXE/BAT.
+### 2. Install on PC
+
+Copy into one folder:
+
+- `GenSoftSync.exe`
+- `config.ini`
+- `run_vfp_export.bat` (edit VFP6 + PRG paths inside)
+
+### 3. Edit `config.ini`
+
+```ini
+[cloud]
+username = your_login
+password = your_password
+
+[vfp]
+run_command = run_vfp_export.bat
+
+[sync]
+folder = .
+every_minutes = 60
+delete_after_upload = true
+```
+
+`folder = .` means the same folder as the EXE.
+
+### 4. Your VFP PRG
+
+Write Excel into the **same software folder** (or `%1` / current directory if you pass it).
+
+Expected names:
+
+| File | Data |
+|------|------|
+| `customers.xlsx` | Parties |
+| `products_stock.xlsx` | Products + stock |
+| `outstanding.xlsx` | Outstanding |
+
+### 5. Run
+
+1. Double-click `GenSoftSync.exe`
+2. **Save config** → **Run now** → **Start with Windows**
+
+---
+
+## Delete rule
+
+| Upload | File in software folder |
+|--------|-------------------------|
+| Success | Deleted |
+| Failed | Kept for next run |

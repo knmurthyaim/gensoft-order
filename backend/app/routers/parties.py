@@ -108,6 +108,11 @@ async def upload_customers_excel(
         )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400, detail=f"Customer upload failed: {exc}"
+        ) from exc
 
 
 @router.get("/{party_id}", response_model=schemas.Party)
