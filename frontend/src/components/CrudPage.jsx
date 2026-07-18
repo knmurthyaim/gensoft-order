@@ -26,19 +26,29 @@ export default function CrudPage({
   columns,
   fields,
   searchable = true,
+  serverLimited = false,
 }) {
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
+  const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyFromFields(fields));
   const [error, setError] = useState("");
 
-  const load = (q = "") =>
-    resource
-      .list(searchable && q ? { search: q } : undefined)
+  const load = (q = appliedSearch, rowLimit = limit) => {
+    setLoading(true);
+    const params = {};
+    if (searchable && q) params.search = q;
+    if (serverLimited) params.limit = rowLimit;
+    return resource
+      .list(Object.keys(params).length ? params : undefined)
       .then(setRows)
-      .catch(() => setError("Failed to load data."));
+      .catch(() => setError("Failed to load data."))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     load();
@@ -81,7 +91,7 @@ export default function CrudPage({
       if (editing) await resource.update(editing.id, payload);
       else await resource.create(payload);
       setShowModal(false);
-      load(search);
+      load(appliedSearch);
     } catch (err) {
       setError(err.response?.data?.detail || "Save failed.");
     }
@@ -91,7 +101,7 @@ export default function CrudPage({
     if (!confirm("Delete this record?")) return;
     try {
       await resource.remove(row.id);
-      load(search);
+      load(appliedSearch);
     } catch (err) {
       alert(err.response?.data?.detail || "Delete failed.");
     }
@@ -112,17 +122,46 @@ export default function CrudPage({
       {error && <div className="error-banner">{error}</div>}
 
       {searchable && (
-        <div className="toolbar">
+        <form
+          className="toolbar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const q = search.trim();
+            setAppliedSearch(q);
+            load(q);
+          }}
+        >
           <input
             className="search-input"
             placeholder="Search..."
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              load(e.target.value);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
           />
-        </div>
+          <button className="btn secondary" type="submit" disabled={loading}>
+            Search
+          </button>
+          {serverLimited && (
+            <select
+              aria-label="Rows to show"
+              value={limit}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setLimit(next);
+                load(appliedSearch, next);
+              }}
+            >
+              {[25, 50, 100].map((n) => (
+                <option key={n} value={n}>{n} rows</option>
+              ))}
+            </select>
+          )}
+        </form>
+      )}
+
+      {serverLimited && (
+        <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+          {loading ? "Loading…" : `Showing ${rows.length} rows. Search to find other records.`}
+        </p>
       )}
 
       <div className="panel">

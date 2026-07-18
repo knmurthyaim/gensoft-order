@@ -9,6 +9,9 @@ export default function Outstanding() {
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -16,24 +19,22 @@ export default function Outstanding() {
     account?.account_type === "distributor" ||
     account?.account_type === "sub_distributor";
 
-  const load = (q = search) =>
-    outstandingApi
-      .list({ search: q || undefined, positive_only: true })
+  const load = (q = appliedSearch, rowLimit = limit) => {
+    setLoading(true);
+    return outstandingApi
+      .list({ search: q || undefined, positive_only: true, limit: rowLimit })
       .then((data) => {
         setSummary(data.summary);
         setRows(data.rows);
       })
-      .catch(() => setError("Failed to load outstanding bills."));
+      .catch(() => setError("Failed to load outstanding bills."))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    load();
+    load("", 25);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const onSearch = (e) => {
-    const q = e.target.value;
-    setSearch(q);
-    load(q);
-  };
 
   return (
     <div>
@@ -77,14 +78,41 @@ export default function Outstanding() {
         </div>
       )}
 
-      <div className="toolbar">
+      <form
+        className="toolbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const q = search.trim();
+          setAppliedSearch(q);
+          load(q);
+        }}
+      >
         <input
           className="search-input"
-          placeholder="Search party name..."
+          placeholder="Search party, code or invoice..."
           value={search}
-          onChange={onSearch}
+          onChange={(e) => setSearch(e.target.value)}
         />
-      </div>
+        <button className="btn secondary" type="submit" disabled={loading}>
+          Search
+        </button>
+        <select
+          aria-label="Rows to show"
+          value={limit}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setLimit(next);
+            load(appliedSearch, next);
+          }}
+        >
+          {[25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} rows</option>
+          ))}
+        </select>
+      </form>
+      <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+        {loading ? "Loading…" : `Showing ${rows.length} of ${summary?.bill_count ?? 0} bills.`}
+      </p>
 
       <div className="panel">
         <table>

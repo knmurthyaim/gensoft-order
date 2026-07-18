@@ -27,7 +27,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 APP_NAME = "GenSoft Sync"
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 TASK_NAME = "GenSoftSync"
 DEFAULT_API = "https://gensoft-order.onrender.com"
 
@@ -115,9 +115,11 @@ def save_config(cfg: configparser.ConfigParser) -> None:
 
 
 def _import_uploader():
+    # Bundled copy first — a stale gensoft_upload.py next to the EXE
+    # must never override the version shipped inside GenSoftSync.exe.
     search = [
-        app_dir(),
         Path(getattr(sys, "_MEIPASS", "")),
+        app_dir(),
         app_dir().parent / "uploader",
     ]
     for up in search:
@@ -136,7 +138,7 @@ def _import_uploader():
 
 
 def _import_export_files():
-    search = [app_dir(), Path(getattr(sys, "_MEIPASS", ""))]
+    search = [Path(getattr(sys, "_MEIPASS", "")), app_dir()]
     for here in search:
         if not here or not str(here) or not here.exists():
             continue
@@ -394,7 +396,7 @@ class SyncApp:
         )
         ttk.Label(
             frm,
-            text="One folder: EXE + config + Excel files. VFP writes here; files delete after upload OK.",
+            text="Run the app from any folder and select the separate Excel export folder below.",
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
         ttk.Label(frm, text="Cloud API").grid(row=2, column=0, sticky="w", **pad)
@@ -423,14 +425,19 @@ class SyncApp:
             row=6, column=2, sticky="w", **pad
         )
 
-        ttk.Label(frm, text="Excel folder (. = this folder)").grid(
+        ttk.Label(frm, text="Excel files folder").grid(
             row=7, column=0, sticky="w", **pad
         )
         ttk.Entry(frm, textvariable=self.folder_var, width=48).grid(
             row=7, column=1, sticky="ew", **pad
         )
-        ttk.Button(frm, text="Open", command=self._open_folder).grid(
-            row=7, column=2, sticky="w", **pad
+        folder_buttons = ttk.Frame(frm)
+        folder_buttons.grid(row=7, column=2, sticky="w", **pad)
+        ttk.Button(folder_buttons, text="Browse…", command=self._browse_folder).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(folder_buttons, text="Open", command=self._open_folder).pack(
+            side=tk.LEFT, padx=(4, 0)
         )
 
         ttk.Label(frm, text="Every (minutes)").grid(row=8, column=0, sticky="w", **pad)
@@ -493,8 +500,23 @@ class SyncApp:
             q = f'"{path}"' if " " in path and not path.startswith('"') else path
             self.cmd_var.set(q)
 
+    def _browse_folder(self) -> None:
+        current = Path(self.folder_var.get().strip() or ".")
+        if not current.is_absolute():
+            current = (app_dir() / current).resolve()
+        initial = str(current) if current.is_dir() else str(app_dir())
+        path = filedialog.askdirectory(
+            title="Select folder containing exported Excel files",
+            initialdir=initial,
+            mustexist=True,
+        )
+        if path:
+            self.folder_var.set(path)
+
     def _open_folder(self) -> None:
         path = Path(self.folder_var.get().strip() or ".")
+        if not path.is_absolute():
+            path = (app_dir() / path).resolve()
         path.mkdir(parents=True, exist_ok=True)
         os.startfile(path)
 

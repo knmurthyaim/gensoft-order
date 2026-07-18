@@ -46,7 +46,7 @@ CUSTOMER_SAMPLE_ROW = [
 def list_parties(
     search: Optional[str] = None,
     location: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=300),
+    limit: int = Query(25, ge=1, le=100),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):

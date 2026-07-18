@@ -55,10 +55,11 @@ PRODUCT_SAMPLE_ROW = [
 @router.get("", response_model=List[schemas.Product])
 def list_products(
     search: Optional[str] = None,
+    limit: int = Query(25, ge=1, le=100),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    return crud.get_products(db, account, search)
+    return crud.get_products(db, account, search, limit)
 
 
 @router.get("/upload/template")

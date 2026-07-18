@@ -43,10 +43,11 @@ OUTSTANDING_SAMPLE_ROW = [
 def list_outstanding(
     search: Optional[str] = None,
     positive_only: bool = True,
+    limit: int = Query(25, ge=1, le=100),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    summary, rows = crud.get_outstanding(db, account, search, positive_only)
+    summary, rows = crud.get_outstanding(db, account, search, positive_only, limit)
     return schemas.OutstandingListResponse(summary=summary, rows=rows)
 
 

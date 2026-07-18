@@ -27,13 +27,27 @@ export default function Stock() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
+  const [loading, setLoading] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
 
-  const load = () =>
-    batches.list().then(setRows).catch(() => setError("Failed to load stock."));
+  const load = (q = appliedSearch, rowLimit = limit) => {
+    setLoading(true);
+    return batches
+      .list({ search: q || undefined, limit: rowLimit })
+      .then(setRows)
+      .catch(() => setError("Failed to load stock."))
+      .finally(() => setLoading(false));
+  };
+
+  const loadProducts = (q = "") =>
+    prodApi.list({ search: q || undefined, limit: 25 }).then(setProducts).catch(() => {});
 
   useEffect(() => {
-    load();
-    prodApi.list().then(setProducts).catch(() => {});
+    load("", 25);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pMap = Object.fromEntries(products.map((p) => [p.id, p]));
@@ -41,12 +55,15 @@ export default function Stock() {
   const openCreate = () => {
     setEditing(null);
     setForm(empty);
+    setProductSearch("");
+    loadProducts();
     setError("");
     setShowModal(true);
   };
 
   const openEdit = (b) => {
     setEditing(b);
+    setProducts(b.product ? [b.product] : []);
     setForm({
       ...b,
       expiry_date: toExpiryMonthInput(b.expiry_date),
@@ -87,7 +104,7 @@ export default function Stock() {
         await batches.create(payload);
       }
       setShowModal(false);
-      load();
+      load(appliedSearch);
     } catch (err) {
       setError(err.response?.data?.detail || "Save failed.");
     }
@@ -96,12 +113,12 @@ export default function Stock() {
   const remove = async (b) => {
     if (!confirm("Delete this batch?")) return;
     await batches.remove(b.id);
-    load();
+    load(appliedSearch);
   };
 
   const toggleVisible = async (b) => {
     await batches.update(b.id, { show_to_customer: !b.show_to_customer });
-    load();
+    load(appliedSearch);
   };
 
   const nearExpiry = (d) => {
@@ -125,6 +142,42 @@ export default function Stock() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <form
+        className="toolbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const q = search.trim();
+          setAppliedSearch(q);
+          load(q);
+        }}
+      >
+        <input
+          className="search-input"
+          placeholder="Search product, code or batch..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button className="btn secondary" type="submit" disabled={loading}>
+          Search
+        </button>
+        <select
+          aria-label="Rows to show"
+          value={limit}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setLimit(next);
+            load(appliedSearch, next);
+          }}
+        >
+          {[25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} rows</option>
+          ))}
+        </select>
+      </form>
+      <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+        {loading ? "Loading…" : `Showing ${rows.length} rows. Search to find other stock.`}
+      </p>
 
       <div className="panel">
         <table>
@@ -195,6 +248,22 @@ export default function Stock() {
             <div className="form-grid">
               <div className="field" style={{ gridColumn: "1 / -1" }}>
                 <label>Product</label>
+                {!editing && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <input
+                      placeholder="Find product..."
+                      value={productSearch}
+                      onChange={(e) => setProductSearch(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn secondary sm"
+                      onClick={() => loadProducts(productSearch.trim())}
+                    >
+                      Search
+                    </button>
+                  </div>
+                )}
                 <select
                   required
                   disabled={!!editing}

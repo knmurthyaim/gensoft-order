@@ -629,11 +629,11 @@ def get_parties(
     account: models.Account,
     search: Optional[str] = None,
     location: Optional[str] = None,
-    limit: int = 100,
+    limit: int = 25,
 ):
     from sqlalchemy.orm import selectinload
 
-    limit = max(1, min(int(limit or 100), 300))
+    limit = max(1, min(int(limit or 25), 100))
     q = (
         db.query(models.Party)
         .options(
@@ -775,13 +775,29 @@ def _attach_stock(p: models.Product) -> models.Product:
     return p
 
 
-def get_products(db: Session, account: models.Account, search: Optional[str] = None):
+def get_products(
+    db: Session,
+    account: models.Account,
+    search: Optional[str] = None,
+    limit: int = 25,
+):
+    limit = max(1, min(int(limit or 25), 100))
     q = db.query(models.Product).filter(
         models.Product.owner_account_id == account.id
     )
     if search:
-        q = q.filter(models.Product.name.ilike(f"%{search}%"))
-    return [_attach_stock(p) for p in q.order_by(models.Product.name).all()]
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(term),
+                models.Product.product_code.ilike(term),
+                models.Product.manufacturer.ilike(term),
+            )
+        )
+    return [
+        _attach_stock(p)
+        for p in q.order_by(models.Product.name).limit(limit).all()
+    ]
 
 
 def get_product(db: Session, account: models.Account, product_id: int):
@@ -839,13 +855,34 @@ def delete_product(db: Session, account, product_id) -> bool:
 
 
 # ---------- Batches (scoped) ----------
-def get_batches(db: Session, account: models.Account, product_id: Optional[int] = None):
-    q = db.query(models.StockBatch).filter(
-        models.StockBatch.owner_account_id == account.id
+def get_batches(
+    db: Session,
+    account: models.Account,
+    product_id: Optional[int] = None,
+    search: Optional[str] = None,
+    limit: int = 25,
+):
+    from sqlalchemy.orm import joinedload
+
+    limit = max(1, min(int(limit or 25), 100))
+    q = (
+        db.query(models.StockBatch)
+        .options(joinedload(models.StockBatch.product))
+        .join(models.Product, models.StockBatch.product_id == models.Product.id)
+        .filter(models.StockBatch.owner_account_id == account.id)
     )
     if product_id:
         q = q.filter(models.StockBatch.product_id == product_id)
-    return q.order_by(models.StockBatch.id.desc()).all()
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Product.name.ilike(term),
+                models.Product.product_code.ilike(term),
+                models.StockBatch.batch_no.ilike(term),
+            )
+        )
+    return q.order_by(models.StockBatch.id.desc()).limit(limit).all()
 
 
 def get_batch(db: Session, account: models.Account, batch_id: int):
@@ -2041,7 +2078,9 @@ def get_outstanding(
     account: models.Account,
     search: Optional[str] = None,
     positive_only: bool = True,
+    limit: int = 25,
 ) -> tuple[schemas.OutstandingSummary, List[schemas.OutstandingBillRow]]:
+    limit = max(1, min(int(limit or 25), 100))
     is_supplier = account.account_type in ("distributor", "sub_distributor")
 
     if is_supplier:
@@ -2081,10 +2120,17 @@ def get_outstanding(
             )
         )
 
+    totals = q.with_entities(
+        func.count(models.OutstandingBill.id),
+        func.coalesce(func.sum(models.OutstandingBill.amount), 0),
+        func.coalesce(func.sum(models.OutstandingBill.paid), 0),
+        func.coalesce(func.sum(models.OutstandingBill.balance), 0),
+    ).one()
+
     bills = q.order_by(
         models.OutstandingBill.party_name,
         models.OutstandingBill.invoice_date.desc(),
-    ).all()
+    ).limit(limit).all()
 
     rows = [
         schemas.OutstandingBillRow(
@@ -2103,10 +2149,10 @@ def get_outstanding(
     ]
 
     summary = schemas.OutstandingSummary(
-        bill_count=len(rows),
-        total_amount=round(sum(r.amount for r in rows), 2),
-        total_paid=round(sum(r.paid for r in rows), 2),
-        total_balance=round(sum(r.balance for r in rows), 2),
+        bill_count=int(totals[0] or 0),
+        total_amount=round(float(totals[1] or 0), 2),
+        total_paid=round(float(totals[2] or 0), 2),
+        total_balance=round(float(totals[3] or 0), 2),
         total_discount=0.0,  # discount column is % — not summed as money
     )
     return summary, rows

@@ -9,6 +9,7 @@ export default function Products() {
       subtitle="Your product master with MRP, PTR, PTS, special rate and GST"
       addLabel="+ Add Product"
       resource={products}
+      serverLimited
       columns={[
         { header: "Code", render: (r) => r.product_code || "—" },
         {

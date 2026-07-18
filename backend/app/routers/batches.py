@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
@@ -13,10 +13,12 @@ router = APIRouter(prefix="/api/batches", tags=["stock-batches"])
 @router.get("", response_model=List[schemas.StockBatch])
 def list_batches(
     product_id: Optional[int] = None,
+    search: Optional[str] = None,
+    limit: int = Query(25, ge=1, le=100),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    return crud.get_batches(db, account, product_id)
+    return crud.get_batches(db, account, product_id, search, limit)
 
 
 @router.post("", response_model=schemas.StockBatch, status_code=201)

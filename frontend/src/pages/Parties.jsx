@@ -26,7 +26,8 @@ export default function Parties() {
   const [rows, setRows] = useState([]);
   const [reps, setReps] = useState([]);
   const [search, setSearch] = useState("");
-  const [debounced, setDebounced] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
@@ -36,10 +37,10 @@ export default function Parties() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const load = (q = "") => {
+  const load = (q = appliedSearch, rowLimit = limit) => {
     setLoading(true);
     return partiesApi
-      .list(q ? { search: q, limit: 100 } : { limit: 100 })
+      .list(q ? { search: q, limit: rowLimit } : { limit: rowLimit })
       .then(setRows)
       .catch(() => setError("Failed to load parties."))
       .finally(() => setLoading(false));
@@ -47,16 +48,10 @@ export default function Parties() {
 
   useEffect(() => {
     repApi.list().then(setReps).catch(() => {});
+    load("", 25);
+    // Initial page only; later loads happen on Search or row-limit changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search.trim()), 300);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => {
-    load(debounced);
-  }, [debounced]);
 
   const repMap = Object.fromEntries(reps.map((r) => [r.id, r.name]));
 
@@ -95,7 +90,7 @@ export default function Parties() {
       if (editing) await partiesApi.update(editing.id, payload);
       else await partiesApi.create(payload);
       setShowModal(false);
-      load(debounced);
+      load(appliedSearch);
     } catch (err) {
       setError(err.response?.data?.detail || "Save failed.");
     }
@@ -104,7 +99,7 @@ export default function Parties() {
   const remove = async (p) => {
     if (!confirm(`Delete "${p.name}"?`)) return;
     await partiesApi.remove(p.id);
-    load(debounced);
+    load(appliedSearch);
   };
 
   const clearLocation = async (p) => {
@@ -116,7 +111,7 @@ export default function Parties() {
       return;
     try {
       await partiesApi.clearLocation(p.id);
-      load(debounced);
+      load(appliedSearch);
     } catch (err) {
       setError(err.response?.data?.detail || "Could not remove location.");
     }
@@ -134,7 +129,7 @@ export default function Parties() {
   const doLink = async (accountId) => {
     await partiesApi.link(linkRow.id, accountId);
     setLinkRow(null);
-    load(debounced);
+    load(appliedSearch);
   };
 
   const dirFiltered = directory.filter(
@@ -161,7 +156,15 @@ export default function Parties() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="toolbar">
+      <form
+        className="toolbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const q = search.trim();
+          setAppliedSearch(q);
+          load(q);
+        }}
+      >
         <input
           className="search-input"
           placeholder="Search parties by name, code, area..."
@@ -171,11 +174,27 @@ export default function Parties() {
             setError("");
           }}
         />
-      </div>
+        <button className="btn secondary" type="submit" disabled={loading}>
+          Search
+        </button>
+        <select
+          aria-label="Rows to show"
+          value={limit}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setLimit(next);
+            load(appliedSearch, next);
+          }}
+        >
+          {[25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} rows</option>
+          ))}
+        </select>
+      </form>
       <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
         {loading
           ? "Loading…"
-          : debounced
+          : appliedSearch
             ? `Showing up to ${rows.length} match${rows.length === 1 ? "" : "es"}`
             : `Showing first ${rows.length} parties — search to find others`}
       </p>
@@ -266,7 +285,7 @@ export default function Parties() {
             {!loading && rows.length === 0 && (
               <tr>
                 <td colSpan={10} className="empty">
-                  {debounced ? "No parties match your search." : "No parties found."}
+                  {appliedSearch ? "No parties match your search." : "No parties found."}
                 </td>
               </tr>
             )}
