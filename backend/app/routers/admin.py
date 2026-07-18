@@ -237,7 +237,7 @@ def list_account_outstanding(
             amount=b.amount,
             paid=b.paid,
             balance=b.balance,
-            age=b.age,
+            age=crud._bill_age(b.invoice_date, b.age),
             discount=b.discount,
         )
         for b in bills

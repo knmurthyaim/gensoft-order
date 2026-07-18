@@ -21,7 +21,7 @@ export default function ExcelUploadBar({
       const result = await onUpload(file);
       onSuccess?.(result, file.name);
     } catch (err) {
-      setError(err.response?.data?.detail || "Upload failed.");
+      setError(err.response?.data?.detail || err.message || "Upload failed.");
     } finally {
       setUploading(false);
     }

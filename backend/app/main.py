@@ -17,7 +17,9 @@ from .routers import (
     rep,
     salesreps,
     settings,
+    sync,
 )
+from . import sync_worker
 
 Base.metadata.create_all(bind=engine)
 migrate_db()
@@ -141,6 +143,10 @@ app.include_router(rep.router)
 app.include_router(orders.router)
 app.include_router(outstanding.router)
 app.include_router(settings.router)
+app.include_router(sync.router)
+
+# Background Excel sync — keeps interactive API free while distributors upload
+sync_worker.start_sync_worker()
 
 
 @app.get("/api/health", tags=["health"])

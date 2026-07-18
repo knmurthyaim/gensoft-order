@@ -30,11 +30,11 @@ OUTSTANDING_SAMPLE_ROW = [
     "R001",
     "Sri Dattha Central Pharmacy",
     "INV-24001",
-    date(2026, 5, 25),  # real Excel date — format DD-MM-YYYY
+    date(2026, 5, 25),  # real Excel date — age = days from this date
     25000,
     8000,
     17000,
-    45,
+    "",  # age left blank — calculated from invoice_date
     0,
 ]
 
@@ -66,7 +66,7 @@ def download_outstanding_template(
     ws.append(
         [
             "NOTE:",
-            "invoice_date = Excel Date cell, or text DD-MM-YYYY / YYYY-MM-DD (example 25-05-2026)",
+            "invoice_date required for auto age (Excel Date or DD-MM-YYYY). Leave age blank — calculated as days since invoice_date.",
         ]
     )
     buf = BytesIO()

@@ -75,9 +75,9 @@ export default function DataImport() {
       <UploadSection
         title="Outstanding bills"
         description={
-          "Invoice-wise outstanding. For invoice_date use an Excel Date cell, " +
-          "or text as DD-MM-YYYY (25-05-2026) or YYYY-MM-DD (2026-05-25). " +
-          "Do not use MM/DD/YYYY (US). Age is calculated from the invoice date."
+          "Invoice-wise outstanding. Put invoice_date as Excel Date or DD-MM-YYYY " +
+          "(or INVOICE_DA from VFP). Age is calculated automatically from invoice_date. " +
+          "Discount column is treated as % (not amount)."
         }
         api={outstanding}
         resultLabel="Bills"

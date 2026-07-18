@@ -663,3 +663,28 @@ class OutstandingBillRow(BaseModel):
 class OutstandingListResponse(BaseModel):
     summary: OutstandingSummary
     rows: List[OutstandingBillRow]
+
+
+# ---------- Async sync jobs ----------
+class SyncJobAccepted(BaseModel):
+    job_id: int
+    status: str = "pending"
+    upload_type: str
+    message: str = "Upload accepted — processing in background."
+
+
+class SyncJobStatus(BaseModel):
+    job_id: int
+    upload_type: str
+    status: str
+    replace_all: bool = True
+    original_filename: str = ""
+    created: int = 0
+    uploaded: int = 0
+    failed: int = 0
+    skipped: int = 0
+    errors: List[str] = []
+    error: str = ""
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None

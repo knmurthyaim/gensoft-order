@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy.orm import relationship
 
@@ -281,3 +282,25 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     product = relationship("Product", foreign_keys=[product_id])
     batch = relationship("StockBatch", foreign_keys=[batch_id])
+
+
+class SyncJob(Base):
+    """Background Excel sync job — keeps the interactive API free while uploading."""
+
+    __tablename__ = "sync_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    upload_type = Column(String, nullable=False)  # customers | products | outstanding
+    status = Column(String, default="pending", index=True)
+    # pending | processing | completed | failed
+    replace_all = Column(Boolean, default=True)
+    original_filename = Column(String, default="")
+    file_path = Column(String, default="")
+    result_json = Column(Text, default="")
+    error = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    owner = relationship("Account", foreign_keys=[account_id])

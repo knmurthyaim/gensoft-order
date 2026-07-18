@@ -73,9 +73,6 @@ export default function Outstanding() {
             <span className="summary-total">
               Balance: {inr(summary.total_balance)}
             </span>
-            {summary.total_discount > 0 && (
-              <span>Discount: {inr(summary.total_discount)}</span>
-            )}
           </div>
         </div>
       )}
@@ -101,7 +98,7 @@ export default function Outstanding() {
               <th style={{ textAlign: "right" }}>Paid</th>
               <th style={{ textAlign: "right" }}>Balance</th>
               <th style={{ textAlign: "right" }}>Age</th>
-              <th style={{ textAlign: "right" }}>Discount</th>
+              <th style={{ textAlign: "right" }}>Disc %</th>
             </tr>
           </thead>
           <tbody>
@@ -119,7 +116,11 @@ export default function Outstanding() {
                   {inr(r.balance)}
                 </td>
                 <td style={{ textAlign: "right" }}>{r.age} days</td>
-                <td style={{ textAlign: "right" }}>{inr(r.discount)}</td>
+                <td style={{ textAlign: "right" }}>
+                  {r.discount != null && Number(r.discount) !== 0
+                    ? `${Number(r.discount)}%`
+                    : "—"}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (

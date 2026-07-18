@@ -25,7 +25,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 import requests
 
 APP_NAME = "GenSoft Data Uploader"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DEFAULT_API = "https://gensoft-order.onrender.com"
 # Large stock sheets can take many minutes on Render cold starts.
 UPLOAD_TIMEOUT_SEC = 1800
@@ -36,6 +36,7 @@ UPLOAD_TYPES = {
         "label": "Customers / Parties",
         "json_path": "/api/parties/upload",
         "excel_path": "/api/parties/upload/excel",
+        "async_type": "customers",
         "template_path": "/api/parties/upload/template",
         "template_name": "gensoft_customers_template.xlsx",
     },
@@ -43,6 +44,7 @@ UPLOAD_TYPES = {
         "label": "Products + Stock",
         "json_path": "/api/products/upload",
         "excel_path": "/api/products/upload/excel",
+        "async_type": "products",
         "template_path": "/api/products/upload/template",
         "template_name": "gensoft_products_stock_template.xlsx",
     },
@@ -50,10 +52,18 @@ UPLOAD_TYPES = {
         "label": "Outstanding Bills",
         "json_path": "/api/outstanding/upload",
         "excel_path": "/api/outstanding/upload/excel",
+        "async_type": "outstanding",
         "template_path": "/api/outstanding/upload/template",
         "template_name": "gensoft_outstanding_template.xlsx",
     },
 }
+
+ASYNC_EXCEL_PATH = "/api/sync/upload/excel"
+ASYNC_JOB_PATH = "/api/sync/jobs"
+POLL_INTERVAL_SEC = 2
+# Accept upload quickly; poll can run for a long time
+ENQUEUE_TIMEOUT_SEC = 300
+POLL_TIMEOUT_SEC = 60
 
 
 def app_dir() -> Path:
@@ -193,15 +203,18 @@ def upload_file(
         suffix = ".xlsx"
 
     if suffix == ".xlsx":
-        url = f"{api_base}{meta['excel_path']}"
-        if replace_all:
-            url = f"{url}?replace_all=true"
+        # Async sync: accept file quickly, poll until background job finishes
+        # so the cloud website stays responsive during large uploads.
+        sync_type = meta.get("async_type") or upload_type
+        params = {"upload_type": sync_type, "replace_all": str(bool(replace_all)).lower()}
+        url = f"{api_base}{ASYNC_EXCEL_PATH}"
         with open(upload_path, "rb") as f:
             if progress_cb:
-                progress_cb("Uploading Excel to cloud (please wait)…")
+                progress_cb("Sending Excel to cloud (async queue)…")
             resp = requests.post(
                 url,
                 headers=headers,
+                params=params,
                 files={
                     "file": (
                         upload_name,
@@ -209,8 +222,27 @@ def upload_file(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
                 },
-                timeout=timeout,
+                timeout=min(timeout, ENQUEUE_TIMEOUT_SEC),
             )
+        if resp.status_code not in (200, 201, 202):
+            raise RuntimeError(
+                f"Upload enqueue failed ({resp.status_code}): {_error_detail(resp)}"
+            )
+        accepted = resp.json()
+        job_id = accepted.get("job_id")
+        if not job_id:
+            raise RuntimeError("Server accepted upload but returned no job_id")
+        if progress_cb:
+            progress_cb(
+                f"Queued as job #{job_id} — processing in background…"
+            )
+        return _poll_sync_job(
+            api_base,
+            token,
+            int(job_id),
+            timeout=timeout,
+            progress_cb=progress_cb,
+        )
     elif suffix == ".json":
         url = f"{api_base}{meta['json_path']}"
         with open(file_path, encoding="utf-8") as f:
@@ -240,6 +272,48 @@ def upload_file(
         raise RuntimeError(f"Upload failed ({resp.status_code}): {_error_detail(resp)}")
 
     return resp.json()
+
+
+def _poll_sync_job(
+    api_base: str,
+    token: str,
+    job_id: int,
+    timeout: int = UPLOAD_TIMEOUT_SEC,
+    progress_cb=None,
+) -> dict:
+    """Poll GET /api/sync/jobs/{id} until completed or failed."""
+    import time
+
+    headers = {"Authorization": f"Bearer {token}"}
+    deadline = time.time() + max(60, timeout)
+    last_status = ""
+    while time.time() < deadline:
+        resp = requests.get(
+            f"{api_base}{ASYNC_JOB_PATH}/{job_id}",
+            headers=headers,
+            timeout=POLL_TIMEOUT_SEC,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Job status failed ({resp.status_code}): {_error_detail(resp)}"
+            )
+        data = resp.json()
+        status = (data.get("status") or "").lower()
+        if status != last_status:
+            last_status = status
+            if progress_cb:
+                progress_cb(f"Job #{job_id}: {status}…")
+        if status == "completed":
+            if progress_cb:
+                progress_cb(f"Job #{job_id}: completed")
+            return data
+        if status == "failed":
+            err = data.get("error") or "Sync job failed"
+            raise RuntimeError(f"Sync job #{job_id} failed: {err}")
+        time.sleep(POLL_INTERVAL_SEC)
+    raise RuntimeError(
+        f"Sync job #{job_id} still running after {timeout}s — check status later"
+    )
 
 
 def run_upload(

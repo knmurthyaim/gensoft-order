@@ -12,6 +12,8 @@ tools/autosync/dist/
 tools/autosync/*.spec
 tools/autosync/gensoft_upload.py
 tools/autosync/config.ini
+backend/sync_uploads/
+sync_uploads/
 __pycache__/
 *.pyc
 .Python

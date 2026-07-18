@@ -98,14 +98,52 @@ function uploadExcelFile(url, file, replaceAll = false) {
     .then((r) => r.data);
 }
 
-function makeUploadApi(basePath, templateFilename) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Enqueue Excel on async sync API and poll until done (keeps site responsive). */
+async function uploadExcelAsync(uploadType, file, replaceAll = false) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const params = {
+    upload_type: uploadType,
+    replace_all: replaceAll ? "true" : "false",
+  };
+  const accepted = await api
+    .post("/sync/upload/excel", fd, {
+      params,
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 5 * 60 * 1000,
+    })
+    .then((r) => r.data);
+  const jobId = accepted.job_id;
+  if (!jobId) throw new Error("Upload accepted but no job_id returned");
+
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const status = await api
+      .get(`/sync/jobs/${jobId}`, { timeout: 60 * 1000 })
+      .then((r) => r.data);
+    if (status.status === "completed") return status;
+    if (status.status === "failed") {
+      throw new Error(status.error || `Sync job #${jobId} failed`);
+    }
+    await sleep(2000);
+  }
+  throw new Error(`Sync job #${jobId} timed out — check later`);
+}
+
+function makeUploadApi(basePath, templateFilename, syncType = null) {
   return {
     downloadTemplate: () =>
       api
         .get(`${basePath}/upload/template`, { responseType: "blob" })
         .then((r) => downloadBlob(r, templateFilename)),
     uploadExcel: (file, replaceAll = false) =>
-      uploadExcelFile(`${basePath}/upload/excel`, file, replaceAll),
+      syncType
+        ? uploadExcelAsync(syncType, file, replaceAll)
+        : uploadExcelFile(`${basePath}/upload/excel`, file, replaceAll),
     uploadJson: (data) => api.post(`${basePath}/upload`, data).then((r) => r.data),
   };
 }
@@ -168,7 +206,7 @@ export const getDashboard = () => api.get("/dashboard").then((r) => r.data);
 // Scoped resources
 export const products = {
   ...crud("products"),
-  ...makeUploadApi("/products", "gensoft_products_stock_template.xlsx"),
+  ...makeUploadApi("/products", "gensoft_products_stock_template.xlsx", "products"),
 };
 export const salesReps = {
   ...crud("sales-reps"),
@@ -189,7 +227,7 @@ export const parties = {
       .then((r) => r.data),
   clearLocation: (id) =>
     api.delete(`/parties/${id}/location`).then((r) => r.data),
-  ...makeUploadApi("/parties", "gensoft_customers_template.xlsx"),
+  ...makeUploadApi("/parties", "gensoft_customers_template.xlsx", "customers"),
 };
 
 export const connections = {
@@ -247,7 +285,7 @@ export const settings = {
 
 export const outstanding = {
   list: (params) => api.get("/outstanding", { params }).then((r) => r.data),
-  ...makeUploadApi("/outstanding", "gensoft_outstanding_template.xlsx"),
+  ...makeUploadApi("/outstanding", "gensoft_outstanding_template.xlsx", "outstanding"),
 };
 
 export const orders = {

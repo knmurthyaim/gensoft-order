@@ -2096,7 +2096,7 @@ def get_outstanding(
             amount=round(b.amount or 0.0, 2),
             paid=round(b.paid or 0.0, 2),
             balance=round(b.balance or 0.0, 2),
-            age=_bill_age(b.invoice_date),
+            age=_bill_age(b.invoice_date, b.age),
             discount=round(b.discount or 0.0, 2),
         )
         for b in bills
@@ -2107,7 +2107,7 @@ def get_outstanding(
         total_amount=round(sum(r.amount for r in rows), 2),
         total_paid=round(sum(r.paid for r in rows), 2),
         total_balance=round(sum(r.balance for r in rows), 2),
-        total_discount=round(sum(r.discount for r in rows), 2),
+        total_discount=0.0,  # discount column is % — not summed as money
     )
     return summary, rows
 
@@ -2149,12 +2149,44 @@ def _resolve_party_ref(
 
 
 def _bill_age(invoice_date: Optional[date], age: Optional[int] = None) -> int:
-    """Days since invoice date (auto). Uploaded age is ignored when date exists."""
+    """Days since invoice date (auto). Prefer date; fall back to uploaded age only if no date."""
     if invoice_date:
         return max((date.today() - invoice_date).days, 0)
     if age is not None:
         return max(int(age), 0)
     return 0
+
+
+def _outstanding_invoice_date(row: dict) -> Optional[date]:
+    """Pick invoice date from common Excel / ERP / VFP column names."""
+    for key in (
+        "invoice_date",
+        "invoice_da",  # VFP truncated INVOICE_DATE
+        "inv_date",
+        "inv_da",
+        "bill_date",
+        "billdate",
+        "invdate",
+        "date",
+        "invoicedate",
+        "doc_date",
+        "docdate",
+    ):
+        if key in row and row.get(key) not in (None, ""):
+            parsed = _parse_upload_date(row.get(key))
+            if parsed:
+                return parsed
+    # Last resort: any column whose name starts with invoice_d / inv_d / bill_d
+    for key, val in row.items():
+        lk = (key or "").lower()
+        if lk.startswith(("invoice_d", "inv_d", "bill_d", "doc_d")) and val not in (
+            None,
+            "",
+        ):
+            parsed = _parse_upload_date(val)
+            if parsed:
+                return parsed
+    return None
 
 
 def _norm_txt(v) -> str:
@@ -2232,6 +2264,7 @@ def _batch_payload_unchanged(batch: models.StockBatch, bdata: dict) -> bool:
 
 
 def _bill_payload_unchanged(bill: models.OutstandingBill, payload: dict) -> bool:
+    """Compare bill fields except age (age is derived from invoice_date daily)."""
     if _norm_txt(bill.party_id) != _norm_txt(payload.get("party_id")):
         return False
     if _norm_txt(bill.party_name) != _norm_txt(payload.get("party_name")):
@@ -2245,8 +2278,6 @@ def _bill_payload_unchanged(bill: models.OutstandingBill, payload: dict) -> bool
     for key in ("amount", "paid", "balance", "discount"):
         if not _same_num(getattr(bill, key, 0), payload.get(key, 0), places=2):
             return False
-    if int(bill.age or 0) != int(payload.get("age") or 0):
-        return False
     return True
 
 
@@ -2273,7 +2304,9 @@ def upload_outstanding_bills(
 
             balance = item.balance
             if balance is None:
-                balance = max(item.amount - item.paid - item.discount, 0.0)
+                # discount is % (not amount) — do not subtract it from amount
+                balance = max(item.amount - item.paid, 0.0)
+            # Always auto-calc age from invoice_date when present
             age = _bill_age(item.invoice_date, item.age)
             party_ref = _resolve_party_ref(
                 db, account.id, item.party_id.strip(), item.party_name
@@ -2306,6 +2339,9 @@ def upload_outstanding_bills(
             )
             if existing:
                 if _bill_payload_unchanged(existing, payload):
+                    # Still refresh age every sync (days keep increasing)
+                    if int(existing.age or 0) != int(age):
+                        existing.age = age
                     skipped += 1
                     continue
                 for k, v in payload.items():
@@ -2385,9 +2421,17 @@ def _parse_upload_date(val) -> Optional[date]:
         "%d-%b-%y",
         "%d %b %Y",
         "%d %B %Y",
+        "%m/%d/%Y",
+        "%Y%m%d",
     ):
         try:
             return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    # Excel sometimes yields "25-May-26" etc.
+    for fmt in ("%d-%b-%y", "%d/%b/%y", "%d-%b-%Y"):
+        try:
+            return datetime.strptime(text.replace("/", "-"), fmt).date()
         except ValueError:
             continue
     return None
@@ -2790,7 +2834,7 @@ def upload_outstanding_from_excel_rows(
             invoice_no = str(row.get("invoice_no", "") or "").strip()
             if not party_name or not invoice_no:
                 continue
-            inv_date = _parse_upload_date(row.get("invoice_date"))
+            inv_date = _outstanding_invoice_date(row)
             amount = float(row.get("amount", 0) or 0)
             paid = float(row.get("paid", 0) or 0)
             discount = float(row.get("discount", 0) or 0)
@@ -2800,8 +2844,11 @@ def upload_outstanding_from_excel_rows(
                 if balance_raw not in (None, "")
                 else None
             )
+            # Excel age column is ignored when invoice_date exists (auto-calculated)
             age_raw = row.get("age")
-            age = int(float(age_raw)) if age_raw not in (None, "") else None
+            age_excel = (
+                int(float(age_raw)) if age_raw not in (None, "") else None
+            )
             bills.append(
                 schemas.OutstandingBillUploadItem(
                     party_id=str(row.get("party_id", "") or "").strip(),
@@ -2811,8 +2858,10 @@ def upload_outstanding_from_excel_rows(
                     amount=max(amount, 0.0),
                     paid=max(paid, 0.0),
                     balance=None if balance is None else max(balance, 0.0),
-                    age=None if age is None else max(age, 0),
-                    discount=discount,  # negative discounts allowed (ERP credits)
+                    age=None if inv_date else (
+                        None if age_excel is None else max(age_excel, 0)
+                    ),
+                    discount=discount,
                 )
             )
         except Exception as exc:
@@ -2820,7 +2869,11 @@ def upload_outstanding_from_excel_rows(
     if not bills:
         raise AppError(
             "No valid outstanding rows found. "
-            + ("; ".join(row_errors[:3]) if row_errors else "Check party_name and invoice_no columns.")
+            + (
+                "; ".join(row_errors[:3])
+                if row_errors
+                else "Need party_name, invoice_no, and invoice_date (for auto age)."
+            )
         )
     result = upload_outstanding_bills(
         db,
