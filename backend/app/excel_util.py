@@ -41,6 +41,9 @@ def normalize_header(h: str) -> str:
         "gst": "gst_pct",
         "gst%": "gst_pct",
         "sales_rep": "sales_rep_name",
+        "sales_rep_": "sales_rep_name",  # DBF 10-char truncation
+        "pricing_mo": "pricing_model",  # DBF 10-char truncation
+        "party_type_": "party_type",
         "owner": "owner_name",
         "dlno": "dl_no",
         "gstno": "gst_no",

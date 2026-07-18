@@ -2570,7 +2570,22 @@ def upload_products_with_stock(
                     )
                     .first()
                 )
-            if not product:
+                if not product:
+                    # Only claim a code-less product by name — same product
+                    # name can exist under different codes (pack variants).
+                    product = (
+                        db.query(models.Product)
+                        .filter(
+                            models.Product.owner_account_id == account.id,
+                            models.Product.name.ilike(item.name.strip()),
+                            or_(
+                                models.Product.product_code == "",
+                                models.Product.product_code.is_(None),
+                            ),
+                        )
+                        .first()
+                    )
+            else:
                 product = (
                     db.query(models.Product)
                     .filter(
@@ -2762,7 +2777,20 @@ def upload_customers(
                     )
                     .first()
                 )
-            if not party:
+                if not party:
+                    # Attach code to a previously code-less party with this
+                    # name, but never steal a party that has a DIFFERENT code —
+                    # many shops share the same name (different areas).
+                    party = (
+                        db.query(models.Party)
+                        .filter(
+                            models.Party.owner_account_id == account.id,
+                            models.Party.name.ilike(item.name.strip()),
+                            or_(models.Party.code == "", models.Party.code.is_(None)),
+                        )
+                        .first()
+                    )
+            else:
                 party = (
                     db.query(models.Party)
                     .filter(

@@ -90,6 +90,77 @@ def delimited_to_xlsx(src: Path, dest: Path) -> Path:
     return dest
 
 
+def dbf_to_xlsx(src: Path, dest: Path) -> Path:
+    """Convert a FoxPro/dBASE DBF table → .xlsx.
+
+    VFP `COPY TO file.xls` WITHOUT `TYPE XL5` writes a DBF with an .xls name,
+    so sync must handle this format too.
+    """
+    import struct
+    from datetime import date
+
+    data = src.read_bytes()
+    nrec = struct.unpack("<I", data[4:8])[0]
+    hdr_len = struct.unpack("<H", data[8:10])[0]
+    rec_len = struct.unpack("<H", data[10:12])[0]
+
+    fields = []
+    pos = 32
+    while pos < hdr_len - 1 and data[pos] != 0x0D:
+        fname = data[pos : pos + 11].split(b"\x00")[0].decode("ascii", "replace")
+        ftype = chr(data[pos + 11])
+        flen = data[pos + 16]
+        fdec = data[pos + 17]
+        fields.append((fname, ftype, flen, fdec))
+        pos += 32
+    if not fields:
+        raise RuntimeError(f"No DBF fields found in {src.name}")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = dest.stem[:31] or "Sheet1"
+    ws.append([f[0].lower() for f in fields])
+
+    for i in range(nrec):
+        off = hdr_len + i * rec_len
+        rec = data[off : off + rec_len]
+        if rec[0:1] == b"*":  # deleted record
+            continue
+        p = 1
+        row = []
+        for _fname, ftype, flen, fdec in fields:
+            raw = rec[p : p + flen]
+            p += flen
+            text = raw.decode("cp1252", "replace").strip()
+            if ftype == "N" and text:
+                try:
+                    row.append(float(text) if fdec else int(text))
+                except ValueError:
+                    row.append(text)
+            elif ftype == "D" and len(text) == 8 and text.isdigit():
+                try:
+                    row.append(date(int(text[:4]), int(text[4:6]), int(text[6:8])))
+                except ValueError:
+                    row.append(text)
+            elif ftype == "L":
+                row.append(text.upper() in ("T", "Y"))
+            else:
+                row.append(text)
+        ws.append(row)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(dest)
+    return dest
+
+
+def _looks_like_dbf(src: Path) -> bool:
+    try:
+        head = src.open("rb").read(1)
+    except OSError:
+        return False
+    return bool(head) and head[0] in (0x02, 0x03, 0x30, 0x31, 0x83, 0x8B, 0xF5, 0xFB)
+
+
 def xls_to_xlsx(src: Path, dest: Path) -> Path:
     """Convert legacy Excel .xls → .xlsx (VFP often writes .xls)."""
     try:
@@ -98,6 +169,10 @@ def xls_to_xlsx(src: Path, dest: Path) -> Path:
         raise RuntimeError(
             "Reading .xls requires xlrd. Reinstall GenSoftSync / pip install xlrd."
         ) from exc
+
+    # VFP `COPY TO x.xls` (no TYPE) actually writes a DBF table
+    if _looks_like_dbf(src):
+        return dbf_to_xlsx(src, dest)
 
     book = xlrd.open_workbook(str(src))
     sheet = book.sheet_by_index(0)
