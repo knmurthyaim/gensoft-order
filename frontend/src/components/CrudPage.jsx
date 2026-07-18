@@ -142,6 +142,7 @@ export default function CrudPage({
           </button>
           {serverLimited && (
             <select
+              className="rows-select"
               aria-label="Rows to show"
               value={limit}
               onChange={(e) => {

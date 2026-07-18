@@ -416,6 +416,13 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
+.rows-select {
+  width: auto;
+  margin-left: auto;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
 .spacer {
   flex: 1;
 }

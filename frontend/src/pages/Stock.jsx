@@ -162,6 +162,7 @@ export default function Stock() {
           Search
         </button>
         <select
+          className="rows-select"
           aria-label="Rows to show"
           value={limit}
           onChange={(e) => {
