@@ -232,6 +232,7 @@ def list_account_outstanding(
             id=b.id,
             party_id=b.party_id,
             party_name=b.party_name,
+            place=(b.party.area or b.party.city or "") if b.party else "",
             invoice_no=b.invoice_no,
             invoice_date=b.invoice_date,
             amount=b.amount,

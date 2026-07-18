@@ -2127,16 +2127,24 @@ def get_outstanding(
         func.coalesce(func.sum(models.OutstandingBill.balance), 0),
     ).one()
 
-    bills = q.order_by(
-        models.OutstandingBill.party_name,
-        models.OutstandingBill.invoice_date.desc(),
-    ).limit(limit).all()
+    from sqlalchemy.orm import selectinload
+
+    bills = (
+        q.options(selectinload(models.OutstandingBill.party))
+        .order_by(
+            models.OutstandingBill.party_name,
+            models.OutstandingBill.invoice_date.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
 
     rows = [
         schemas.OutstandingBillRow(
             id=b.id,
             party_id=b.party_id or "",
             party_name=b.party_name,
+            place=(b.party.area or b.party.city or "") if b.party else "",
             invoice_no=b.invoice_no,
             invoice_date=b.invoice_date,
             amount=round(b.amount or 0.0, 2),
@@ -3422,8 +3430,12 @@ def admin_list_parties(
 def admin_list_outstanding(
     db: Session, account_id: int, search: Optional[str] = None, limit: int = 200
 ):
-    q = db.query(models.OutstandingBill).filter(
-        models.OutstandingBill.owner_account_id == account_id
+    from sqlalchemy.orm import selectinload
+
+    q = (
+        db.query(models.OutstandingBill)
+        .options(selectinload(models.OutstandingBill.party))
+        .filter(models.OutstandingBill.owner_account_id == account_id)
     )
     if search:
         like = f"%{search.strip()}%"

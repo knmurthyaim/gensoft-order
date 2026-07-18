@@ -651,6 +651,7 @@ class OutstandingBillRow(BaseModel):
     id: int
     party_id: str
     party_name: str
+    place: str = ""
     invoice_no: str
     invoice_date: Optional[date] = None
     amount: float

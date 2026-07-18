@@ -121,6 +121,7 @@ export default function Outstanding() {
             <tr>
               <th>Party ID</th>
               <th>Party Name</th>
+              <th>Place</th>
               <th>Invoice No</th>
               <th>Invoice Date</th>
               <th style={{ textAlign: "right" }}>Amount</th>
@@ -137,6 +138,7 @@ export default function Outstanding() {
                 <td>
                   <strong>{r.party_name}</strong>
                 </td>
+                <td>{r.place || "—"}</td>
                 <td>{r.invoice_no}</td>
                 <td>{fmtDate(r.invoice_date)}</td>
                 <td style={{ textAlign: "right" }}>{inr(r.amount)}</td>
@@ -154,7 +156,7 @@ export default function Outstanding() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="empty">
+                <td colSpan={10} className="empty">
                   No outstanding bills found.
                 </td>
               </tr>
