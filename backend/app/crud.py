@@ -2073,6 +2073,27 @@ def get_dashboard_stats(db: Session, account: models.Account) -> schemas.Dashboa
     )
 
 
+def _party_place_by_code(db: Session, party_codes) -> dict:
+    """Map (owner_account_id, party code) -> place (area, else city) from party master."""
+    codes = {(c or "").strip() for c in party_codes if (c or "").strip()}
+    if not codes:
+        return {}
+    rows = (
+        db.query(
+            models.Party.owner_account_id,
+            models.Party.code,
+            models.Party.area,
+            models.Party.city,
+        )
+        .filter(models.Party.code.in_(codes))
+        .all()
+    )
+    return {
+        (owner_id, (code or "").strip()): (area or city or "")
+        for owner_id, code, area, city in rows
+    }
+
+
 def get_outstanding(
     db: Session,
     account: models.Account,
@@ -2127,11 +2148,8 @@ def get_outstanding(
         func.coalesce(func.sum(models.OutstandingBill.balance), 0),
     ).one()
 
-    from sqlalchemy.orm import selectinload
-
     bills = (
-        q.options(selectinload(models.OutstandingBill.party))
-        .order_by(
+        q.order_by(
             models.OutstandingBill.party_name,
             models.OutstandingBill.invoice_date.desc(),
         )
@@ -2139,12 +2157,14 @@ def get_outstanding(
         .all()
     )
 
+    place_map = _party_place_by_code(db, [b.party_id for b in bills])
+
     rows = [
         schemas.OutstandingBillRow(
             id=b.id,
             party_id=b.party_id or "",
             party_name=b.party_name,
-            place=(b.party.area or b.party.city or "") if b.party else "",
+            place=place_map.get((b.owner_account_id, (b.party_id or "").strip()), ""),
             invoice_no=b.invoice_no,
             invoice_date=b.invoice_date,
             amount=round(b.amount or 0.0, 2),
@@ -3430,12 +3450,8 @@ def admin_list_parties(
 def admin_list_outstanding(
     db: Session, account_id: int, search: Optional[str] = None, limit: int = 200
 ):
-    from sqlalchemy.orm import selectinload
-
-    q = (
-        db.query(models.OutstandingBill)
-        .options(selectinload(models.OutstandingBill.party))
-        .filter(models.OutstandingBill.owner_account_id == account_id)
+    q = db.query(models.OutstandingBill).filter(
+        models.OutstandingBill.owner_account_id == account_id
     )
     if search:
         like = f"%{search.strip()}%"

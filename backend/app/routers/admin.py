@@ -227,12 +227,13 @@ def list_account_outstanding(
     if not crud.admin_get_account(db, account_id):
         raise HTTPException(status_code=404, detail="Account not found")
     bills = crud.admin_list_outstanding(db, account_id, search=search)
+    place_map = crud._party_place_by_code(db, [b.party_id for b in bills])
     return [
         schemas.OutstandingBillRow(
             id=b.id,
             party_id=b.party_id,
             party_name=b.party_name,
-            place=(b.party.area or b.party.city or "") if b.party else "",
+            place=place_map.get((b.owner_account_id, (b.party_id or "").strip()), ""),
             invoice_no=b.invoice_no,
             invoice_date=b.invoice_date,
             amount=b.amount,
