@@ -40,33 +40,26 @@ function aggregate(entry) {
 export function RepCustomers() {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
-  const [debounced, setDebounced] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [taggingId, setTaggingId] = useState(null);
 
-  const reload = () => {
+  const reload = (search = appliedSearch, rowLimit = limit) => {
     setLoading(true);
     setError("");
     repApi
-      .customers(
-        debounced
-          ? { search: debounced, limit: 100 }
-          : { limit: 80 }
-      )
+      .customers({ search: search || undefined, limit: rowLimit })
       .then(setRows)
       .catch((e) => setError(e.response?.data?.detail || "Failed to load parties"))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 300);
-    return () => clearTimeout(t);
-  }, [q]);
-
-  useEffect(() => {
-    reload();
-  }, [debounced]);
+    reload("", 25);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const mapsUrl = (lat, lng) =>
     `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
@@ -117,19 +110,45 @@ export function RepCustomers() {
         sales reps of your distributor. Only stockist can delete a tag.
       </p>
       {error && <div className="error-banner">{error}</div>}
-      <input
-        className="search-input"
-        placeholder="Search party name, code, area..."
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        style={{ marginBottom: 8, width: "100%", maxWidth: 420 }}
-      />
+      <form
+        className="toolbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const search = q.trim();
+          setAppliedSearch(search);
+          reload(search);
+        }}
+      >
+        <input
+          className="search-input"
+          placeholder="Search party name, code, area..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button className="btn secondary" type="submit" disabled={loading}>
+          Search
+        </button>
+        <select
+          className="rows-select"
+          aria-label="Rows to show"
+          value={limit}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setLimit(next);
+            reload(appliedSearch, next);
+          }}
+        >
+          {[25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} rows</option>
+          ))}
+        </select>
+      </form>
       <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
         {loading
           ? "Loading…"
-          : debounced
+          : appliedSearch
             ? `Showing up to ${rows.length} match${rows.length === 1 ? "" : "es"}`
-            : `Showing first ${rows.length} parties — type to search all`}
+            : `Showing first ${rows.length} parties — search to find others`}
       </p>
       <div className="rep-customer-list">
         {rows.map((p) => {
@@ -176,7 +195,7 @@ export function RepCustomers() {
         })}
         {!loading && rows.length === 0 && (
           <div className="empty">
-            {debounced
+            {appliedSearch
               ? "No matching parties."
               : "No parties in distributor master yet."}
           </div>
@@ -489,32 +508,69 @@ export function RepOrders() {
 export function RepStock() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const load = (search = appliedSearch, rowLimit = limit) => {
+    setLoading(true);
+    setError("");
+    return repApi
+      .stock({ search: search || undefined, limit: rowLimit })
+      .then((data) => setItems(data.items || []))
+      .catch((e) =>
+        setError(e.response?.data?.detail || "Failed to load stock")
+      )
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      repApi
-        .stock(q.trim() ? { search: q.trim(), limit: 80 } : { limit: 60 })
-        .then((data) => setItems(data.items || []))
-        .catch((e) =>
-          setError(e.response?.data?.detail || "Failed to load stock")
-        );
-    }, 300);
-    return () => clearTimeout(t);
-  }, [q]);
+    load("", 25);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="rep-page">
       <h1 className="page-title">Stock</h1>
       <p className="page-sub">Your distributor stock only (read only).</p>
       {error && <div className="error-banner">{error}</div>}
-      <input
-        className="search-input"
-        placeholder="Search product name or code..."
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
-      />
+      <form
+        className="toolbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const search = q.trim();
+          setAppliedSearch(search);
+          load(search);
+        }}
+      >
+        <input
+          className="search-input"
+          placeholder="Search product name or code..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button className="btn secondary" type="submit" disabled={loading}>
+          Search
+        </button>
+        <select
+          className="rows-select"
+          aria-label="Rows to show"
+          value={limit}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setLimit(next);
+            load(appliedSearch, next);
+          }}
+        >
+          {[25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} rows</option>
+          ))}
+        </select>
+      </form>
+      <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
+        {loading ? "Loading…" : `Showing ${items.length} stock items.`}
+      </p>
       <div className="panel">
         <table>
           <thead>
@@ -568,21 +624,28 @@ export function RepOutstanding() {
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [limit, setLimit] = useState(25);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const load = (search = q) =>
-    repApi
-      .outstanding(search ? { search } : undefined)
+  const load = (search = appliedSearch, rowLimit = limit) => {
+    setLoading(true);
+    setError("");
+    return repApi
+      .outstanding({ search: search || undefined, limit: rowLimit })
       .then((data) => {
         setSummary(data.summary);
         setRows(data.rows || []);
       })
       .catch((e) =>
         setError(e.response?.data?.detail || "Failed to load outstanding")
-      );
+      )
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    load();
+    load("", 25);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -604,21 +667,50 @@ export function RepOutstanding() {
           </div>
         </div>
       )}
-      <input
-        className="search-input"
-        placeholder="Search party / invoice..."
-        value={q}
-        onChange={(e) => {
-          setQ(e.target.value);
-          load(e.target.value);
+      <form
+        className="toolbar"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const search = q.trim();
+          setAppliedSearch(search);
+          load(search);
         }}
-        style={{ marginBottom: 12, width: "100%", maxWidth: 420 }}
-      />
+      >
+        <input
+          className="search-input"
+          placeholder="Search party / invoice..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button className="btn secondary" type="submit" disabled={loading}>
+          Search
+        </button>
+        <select
+          className="rows-select"
+          aria-label="Rows to show"
+          value={limit}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setLimit(next);
+            load(appliedSearch, next);
+          }}
+        >
+          {[25, 50, 100].map((n) => (
+            <option key={n} value={n}>{n} rows</option>
+          ))}
+        </select>
+      </form>
+      <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
+        {loading
+          ? "Loading…"
+          : `Showing ${rows.length} of ${summary?.bill_count ?? 0} bills.`}
+      </p>
       <div className="panel">
         <table>
           <thead>
             <tr>
               <th>Party</th>
+              <th>Place</th>
               <th>Invoice</th>
               <th>Date</th>
               <th>Balance</th>
@@ -632,6 +724,7 @@ export function RepOutstanding() {
                   <strong>{r.party_name}</strong>
                   <div className="muted">{r.party_id || ""}</div>
                 </td>
+                <td>{r.place || "—"}</td>
                 <td>{r.invoice_no}</td>
                 <td>{fmtDate(r.invoice_date)}</td>
                 <td className="order-amount">{inr(r.balance)}</td>
@@ -640,7 +733,7 @@ export function RepOutstanding() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="empty">
+                <td colSpan={6} className="empty">
                   No outstanding bills.
                 </td>
               </tr>

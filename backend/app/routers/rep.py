@@ -29,7 +29,7 @@ def _mask_batch(batch_dict: dict, settings: schemas.DistributorSettings):
 @router.get("/customers", response_model=List[schemas.Party])
 def list_customers(
     search: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(25, ge=1, le=100),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -74,7 +74,7 @@ def tag_customer_location(
 @router.get("/stock")
 def list_stock(
     search: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=300),
+    limit: int = Query(25, ge=1, le=100),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -103,12 +103,15 @@ def list_stock(
 @router.get("/outstanding", response_model=schemas.OutstandingListResponse)
 def list_outstanding(
     search: Optional[str] = None,
+    limit: int = Query(25, ge=1, le=100),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_rep(user)
     try:
-        summary, rows = crud.get_rep_outstanding(db, user, search=search)
+        summary, rows = crud.get_rep_outstanding(
+            db, user, search=search, limit=limit
+        )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return schemas.OutstandingListResponse(summary=summary, rows=rows)

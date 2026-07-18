@@ -1351,7 +1351,10 @@ def get_rep_stock(
 
 
 def get_rep_outstanding(
-    db: Session, user: models.User, search: Optional[str] = None
+    db: Session,
+    user: models.User,
+    search: Optional[str] = None,
+    limit: int = 25,
 ):
     """Outstanding bills from distributor party master."""
     if user.role != "rep" or not user.account_id:
@@ -1361,7 +1364,9 @@ def get_rep_outstanding(
     )
     if not distributor:
         raise AppError("Distributor account not found")
-    return get_outstanding(db, distributor, search=search, positive_only=True)
+    return get_outstanding(
+        db, distributor, search=search, positive_only=True, limit=limit
+    )
 
 
 def get_rep_catalog(
