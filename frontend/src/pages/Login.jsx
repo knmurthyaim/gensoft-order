@@ -9,12 +9,21 @@ const DEMO = [
   { u: "naresh", label: "M Naresh (Sales Rep app)" },
 ];
 
+function isNativeApp() {
+  try {
+    return !!window.Capacitor?.isNativePlatform?.();
+  } catch {
+    return false;
+  }
+}
+
 export default function Login() {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const isNative = isNativeApp();
 
   const submitLogin = async (e) => {
     e.preventDefault();
@@ -97,6 +106,16 @@ export default function Login() {
         <p className="login-note muted">
           New user registration is managed by the Super Admin only.
         </p>
+
+        {!isNative && (
+          <a
+            className="login-apk-link"
+            href="/gensoft.apk"
+            download="GenSoft.apk"
+          >
+            Download Android app (sales reps)
+          </a>
+        )}
       </div>
     </div>
   );

@@ -16,6 +16,10 @@ import {
   startNativeBackgroundTracking,
   stopNativeBackgroundTracking,
 } from "../nativeBgLocation";
+import {
+  startPersistentRepTracking,
+  stopPersistentRepTracking,
+} from "../persistentRepTracking";
 
 function aggregate(entry) {
   const batches = entry.batches || [];
@@ -887,6 +891,21 @@ export function RepShell({ children }) {
           },
         });
         usingNative = !!res.started;
+        if (usingNative) {
+          try {
+            const auth = await repApi.trackingToken();
+            await startPersistentRepTracking({
+              token: auth.tracking_token,
+              apiBase: getApiBase(),
+              intervalSec: intervalMs / 1000,
+              minMoveMeters,
+            });
+            // The persistent native service now owns location updates.
+            await stopNativeBackgroundTracking();
+          } catch {
+            // Keep the community watcher as fallback while the app process lives.
+          }
+        }
       }
 
       if (!usingNative) {
@@ -938,6 +957,7 @@ export function RepShell({ children }) {
         if (cancelled) return;
         if (!cfg?.enabled) {
           persistMeta(false);
+          stopPersistentRepTracking();
           setLocStatus("off");
           return;
         }
@@ -989,6 +1009,11 @@ export function RepShell({ children }) {
     }
   }, [locStatus]);
 
+  const logoutRep = async () => {
+    await stopPersistentRepTracking();
+    logout();
+  };
+
   return (
     <div className="rep-app">
       <header className="rep-header">
@@ -1009,7 +1034,7 @@ export function RepShell({ children }) {
           >
             Password
           </button>
-          <button className="logout-btn" onClick={logout}>
+          <button className="logout-btn" onClick={logoutRep}>
             Logout
           </button>
         </div>

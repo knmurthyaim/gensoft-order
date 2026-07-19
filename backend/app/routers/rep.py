@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..database import get_db
-from ..deps import get_current_user
+from ..deps import get_current_user, get_location_user
+from ..security import create_access_token
 
 router = APIRouter(prefix="/api/rep", tags=["sales-rep-app"])
 
@@ -194,10 +195,23 @@ def location_config(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post("/tracking-token")
+def create_tracking_token(
+    user: models.User = Depends(get_current_user),
+):
+    """Restricted token used only by the native location service."""
+    _require_rep(user)
+    token = create_access_token(
+        {"sub": str(user.id), "scope": "rep_tracking"},
+        expires_minutes=60 * 24 * 365,
+    )
+    return {"tracking_token": token, "expires_days": 365}
+
+
 @router.post("/location")
 def post_location(
     data: schemas.RepLocationPing,
-    user: models.User = Depends(get_current_user),
+    user: models.User = Depends(get_location_user),
     db: Session = Depends(get_db),
 ):
     """Sales rep GPS ping. Stored only if distributor enabled tracking."""

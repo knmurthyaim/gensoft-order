@@ -16,6 +16,8 @@ def get_current_user(
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") == "rep_tracking":
+        raise HTTPException(status_code=401, detail="Tracking token cannot access this endpoint")
     user = (
         db.query(models.User)
         .filter(models.User.id == int(payload["sub"]))
@@ -23,6 +25,23 @@ def get_current_user(
     )
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
+
+
+def get_location_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> models.User:
+    """Authenticate normal app tokens or restricted native tracking tokens."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1].strip()
+    payload = decode_access_token(token)
+    if not payload or "sub" not in payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = db.query(models.User).filter(models.User.id == int(payload["sub"])).first()
+    if not user or not user.is_active or user.role != "rep":
+        raise HTTPException(status_code=401, detail="Active sales rep required")
     return user
 
 

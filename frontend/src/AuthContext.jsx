@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { auth, setUnauthorizedHandler, tokenStore } from "./api";
+import { stopPersistentRepTracking } from "./persistentRepTracking";
 
 const AuthContext = createContext(null);
 
@@ -27,6 +28,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
+      stopPersistentRepTracking();
       tokenStore.clear();
       setUser(null);
       setAccount(null);
@@ -46,6 +48,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    stopPersistentRepTracking();
     tokenStore.clear();
     setUser(null);
     setAccount(null);

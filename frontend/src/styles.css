@@ -1513,6 +1513,20 @@ textarea {
   text-align: center;
 }
 
+.login-apk-link {
+  display: block;
+  margin-top: 14px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary, #1a73e8);
+  text-decoration: none;
+}
+
+.login-apk-link:hover {
+  text-decoration: underline;
+}
+
 .admin-page {
   min-height: 100vh;
   background: #eef2f7;
