@@ -576,6 +576,7 @@ export function RepStock() {
         {loading ? "Loading…" : `Showing ${items.length} stock items.`}
       </p>
       <div className="panel">
+        <div className="table-scroll">
         <table>
           <thead>
             <tr>
@@ -619,6 +620,7 @@ export function RepStock() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
@@ -710,6 +712,7 @@ export function RepOutstanding() {
           : `Showing ${rows.length} of ${summary?.bill_count ?? 0} bills.`}
       </p>
       <div className="panel">
+        <div className="table-scroll">
         <table>
           <thead>
             <tr>
@@ -744,6 +747,7 @@ export function RepOutstanding() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

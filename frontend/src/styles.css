@@ -1065,6 +1065,16 @@ details summary {
   overflow-x: auto;
 }
 
+/* Horizontally swipeable tables on small screens */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll table {
+  min-width: 560px;
+}
+
 .parties-table th,
 .parties-table td {
   vertical-align: top;
