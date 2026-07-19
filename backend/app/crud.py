@@ -2191,42 +2191,6 @@ def get_outstanding(
     return summary, rows
 
 
-def _resolve_party_ref(
-    db: Session, owner_id: int, party_id: str, party_name: str
-) -> Optional[int]:
-    if party_id:
-        by_code = (
-            db.query(models.Party)
-            .filter(
-                models.Party.owner_account_id == owner_id,
-                models.Party.code == party_id,
-            )
-            .first()
-        )
-        if by_code:
-            return by_code.id
-        if party_id.isdigit():
-            by_id = (
-                db.query(models.Party)
-                .filter(
-                    models.Party.owner_account_id == owner_id,
-                    models.Party.id == int(party_id),
-                )
-                .first()
-            )
-            if by_id:
-                return by_id.id
-    by_name = (
-        db.query(models.Party)
-        .filter(
-            models.Party.owner_account_id == owner_id,
-            models.Party.name.ilike(party_name.strip()),
-        )
-        .first()
-    )
-    return by_name.id if by_name else None
-
-
 def _bill_age(invoice_date: Optional[date], age: Optional[int] = None) -> int:
     """Days since invoice date (auto). Prefer date; fall back to uploaded age only if no date."""
     if invoice_date:
@@ -2374,6 +2338,35 @@ def upload_outstanding_bills(
     errors: List[str] = []
     seen_keys: set[tuple[str, str]] = set()
 
+    # Prefetch parties and bills once — per-row queries made big syncs run
+    # for minutes and starved the web app while a sync job was processing.
+    party_by_code: dict[str, int] = {}
+    party_by_id: dict[int, int] = {}
+    party_by_name: dict[str, int] = {}
+    for p in (
+        db.query(models.Party)
+        .filter(models.Party.owner_account_id == account.id)
+        .all()
+    ):
+        pcode = (p.code or "").strip()
+        if pcode and pcode not in party_by_code:
+            party_by_code[pcode] = p.id
+        party_by_id[p.id] = p.id
+        name_key = (p.name or "").strip().lower()
+        if name_key and name_key not in party_by_name:
+            party_by_name[name_key] = p.id
+
+    existing_bills = (
+        db.query(models.OutstandingBill)
+        .filter(models.OutstandingBill.owner_account_id == account.id)
+        .all()
+    )
+    bill_by_key: dict[tuple[str, str], models.OutstandingBill] = {}
+    for b in existing_bills:
+        bill_by_key.setdefault(
+            ((b.invoice_no or "").strip(), (b.party_id or "").strip()), b
+        )
+
     for i, item in enumerate(data.bills, start=1):
         try:
             if not item.party_name.strip():
@@ -2387,22 +2380,18 @@ def upload_outstanding_bills(
                 balance = max(item.amount - item.paid, 0.0)
             # Always auto-calc age from invoice_date when present
             age = _bill_age(item.invoice_date, item.age)
-            party_ref = _resolve_party_ref(
-                db, account.id, item.party_id.strip(), item.party_name
-            )
             inv = item.invoice_no.strip()
             pid = item.party_id.strip()
+            party_ref = None
+            if pid:
+                party_ref = party_by_code.get(pid)
+                if party_ref is None and pid.isdigit():
+                    party_ref = party_by_id.get(int(pid))
+            if party_ref is None:
+                party_ref = party_by_name.get(item.party_name.strip().lower())
             seen_keys.add((inv, pid))
 
-            existing = (
-                db.query(models.OutstandingBill)
-                .filter(
-                    models.OutstandingBill.owner_account_id == account.id,
-                    models.OutstandingBill.invoice_no == inv,
-                    models.OutstandingBill.party_id == pid,
-                )
-                .first()
-            )
+            existing = bill_by_key.get((inv, pid))
             payload = dict(
                 owner_account_id=account.id,
                 party_ref_id=party_ref,
@@ -2435,11 +2424,6 @@ def upload_outstanding_bills(
 
     # Full dump: remove bills that are no longer in the file
     if data.replace_all and seen_keys:
-        existing_bills = (
-            db.query(models.OutstandingBill)
-            .filter(models.OutstandingBill.owner_account_id == account.id)
-            .all()
-        )
         for bill in existing_bills:
             key = (_norm_txt(bill.invoice_no), _norm_txt(bill.party_id))
             if key not in seen_keys:
@@ -2560,45 +2544,49 @@ def upload_products_with_stock(
     seen_product_ids: set[int] = set()
     seen_batch_keys: set[tuple[int, str]] = set()
 
+    # Prefetch products and batches once — per-row queries made big syncs run
+    # for minutes and starved the web app while a sync job was processing.
+    product_by_code: dict[str, models.Product] = {}
+    codeless_by_name: dict[str, models.Product] = {}
+    any_by_name: dict[str, models.Product] = {}
+    for p in (
+        db.query(models.Product)
+        .filter(models.Product.owner_account_id == account.id)
+        .order_by(models.Product.id.asc())
+        .all()
+    ):
+        pcode = (p.product_code or "").strip()
+        name_key = (p.name or "").strip().lower()
+        if pcode:
+            product_by_code.setdefault(pcode, p)
+        elif name_key:
+            codeless_by_name.setdefault(name_key, p)
+        if name_key:
+            any_by_name.setdefault(name_key, p)
+
+    batch_by_key: dict[tuple[int, str], models.StockBatch] = {}
+    for b in (
+        db.query(models.StockBatch)
+        .filter(models.StockBatch.owner_account_id == account.id)
+        .all()
+    ):
+        batch_by_key.setdefault((b.product_id, b.batch_no or ""), b)
+
     for i, item in enumerate(data.products, start=1):
         try:
             if not item.name.strip():
                 raise AppError("name is required")
             code = item.product_code.strip()
+            name_key = item.name.strip().lower()
             product = None
             if code:
-                product = (
-                    db.query(models.Product)
-                    .filter(
-                        models.Product.owner_account_id == account.id,
-                        models.Product.product_code == code,
-                    )
-                    .first()
-                )
+                product = product_by_code.get(code)
                 if not product:
                     # Only claim a code-less product by name — same product
                     # name can exist under different codes (pack variants).
-                    product = (
-                        db.query(models.Product)
-                        .filter(
-                            models.Product.owner_account_id == account.id,
-                            models.Product.name.ilike(item.name.strip()),
-                            or_(
-                                models.Product.product_code == "",
-                                models.Product.product_code.is_(None),
-                            ),
-                        )
-                        .first()
-                    )
+                    product = codeless_by_name.pop(name_key, None)
             else:
-                product = (
-                    db.query(models.Product)
-                    .filter(
-                        models.Product.owner_account_id == account.id,
-                        models.Product.name.ilike(item.name.strip()),
-                    )
-                    .first()
-                )
+                product = any_by_name.get(name_key)
             payload = item.model_dump(exclude={"batches"})
             touched = False
             if product:
@@ -2615,19 +2603,17 @@ def upload_products_with_stock(
                 product.product_code = code or f"P{product.id:04d}"
                 touched = True
             seen_product_ids.add(product.id)
+            # Keep lookups current so later rows in this file match this product
+            final_code = (product.product_code or "").strip()
+            if final_code:
+                product_by_code.setdefault(final_code, product)
+            if name_key:
+                any_by_name.setdefault(name_key, product)
 
             for batch_item in item.batches:
                 batch_no = batch_item.batch_no.strip() or "DEFAULT"
                 seen_batch_keys.add((product.id, batch_no))
-                batch = (
-                    db.query(models.StockBatch)
-                    .filter(
-                        models.StockBatch.owner_account_id == account.id,
-                        models.StockBatch.product_id == product.id,
-                        models.StockBatch.batch_no == batch_no,
-                    )
-                    .first()
-                )
+                batch = batch_by_key.get((product.id, batch_no))
                 bdata = batch_item.model_dump()
                 bdata["batch_no"] = batch_no
                 bdata["mrp"] = bdata["mrp"] if bdata["mrp"] is not None else product.mrp
@@ -2646,13 +2632,13 @@ def upload_products_with_stock(
                         setattr(batch, k, v)
                     touched = True
                 else:
-                    db.add(
-                        models.StockBatch(
-                            owner_account_id=account.id,
-                            product_id=product.id,
-                            **bdata,
-                        )
+                    new_batch = models.StockBatch(
+                        owner_account_id=account.id,
+                        product_id=product.id,
+                        **bdata,
                     )
+                    db.add(new_batch)
+                    batch_by_key[(product.id, batch_no)] = new_batch
                     touched = True
 
             if touched:
@@ -2755,55 +2741,52 @@ def upload_customers(
     errors: List[str] = []
     seen_ids: set[int] = set()
 
+    # Prefetch reps and parties once — per-row queries made big syncs run
+    # for minutes and starved the web app while a sync job was processing.
+    rep_by_name = {
+        (r.name or "").strip().lower(): r.id
+        for r in db.query(models.SalesRep)
+        .filter(models.SalesRep.owner_account_id == account.id)
+        .all()
+    }
+    party_by_code: dict[str, models.Party] = {}
+    codeless_by_name: dict[str, models.Party] = {}
+    any_by_name: dict[str, models.Party] = {}
+    for p in (
+        db.query(models.Party)
+        .filter(models.Party.owner_account_id == account.id)
+        .order_by(models.Party.id.asc())
+        .all()
+    ):
+        pcode = (p.code or "").strip()
+        name_key = (p.name or "").strip().lower()
+        if pcode:
+            party_by_code.setdefault(pcode, p)
+        elif name_key:
+            codeless_by_name.setdefault(name_key, p)
+        if name_key:
+            any_by_name.setdefault(name_key, p)
+
     for i, item in enumerate(data.customers, start=1):
         try:
             if not item.name.strip():
                 raise AppError("name is required")
             rep_id = None
             if item.sales_rep_name.strip():
-                rep = (
-                    db.query(models.SalesRep)
-                    .filter(
-                        models.SalesRep.owner_account_id == account.id,
-                        models.SalesRep.name.ilike(item.sales_rep_name.strip()),
-                    )
-                    .first()
-                )
-                rep_id = rep.id if rep else None
+                rep_id = rep_by_name.get(item.sales_rep_name.strip().lower())
 
             code = item.code.strip()
+            name_key = item.name.strip().lower()
             party = None
             if code:
-                party = (
-                    db.query(models.Party)
-                    .filter(
-                        models.Party.owner_account_id == account.id,
-                        models.Party.code == code,
-                    )
-                    .first()
-                )
+                party = party_by_code.get(code)
                 if not party:
                     # Attach code to a previously code-less party with this
                     # name, but never steal a party that has a DIFFERENT code —
                     # many shops share the same name (different areas).
-                    party = (
-                        db.query(models.Party)
-                        .filter(
-                            models.Party.owner_account_id == account.id,
-                            models.Party.name.ilike(item.name.strip()),
-                            or_(models.Party.code == "", models.Party.code.is_(None)),
-                        )
-                        .first()
-                    )
+                    party = codeless_by_name.pop(name_key, None)
             else:
-                party = (
-                    db.query(models.Party)
-                    .filter(
-                        models.Party.owner_account_id == account.id,
-                        models.Party.name.ilike(item.name.strip()),
-                    )
-                    .first()
-                )
+                party = any_by_name.get(name_key)
 
             payload = item.model_dump(exclude={"sales_rep_name"})
             payload["sales_rep_id"] = rep_id
@@ -2821,6 +2804,13 @@ def upload_customers(
                 db.flush()
                 seen_ids.add(party.id)
             created += 1
+            # Keep lookups current so later rows in this file match this party
+            if code:
+                party_by_code.setdefault(code, party)
+            elif name_key:
+                codeless_by_name.setdefault(name_key, party)
+            if name_key:
+                any_by_name.setdefault(name_key, party)
         except Exception as exc:
             failed += 1
             errors.append(f"Customer row {i}: {exc}")
