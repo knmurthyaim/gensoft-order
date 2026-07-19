@@ -121,6 +121,11 @@ app = FastAPI(
 
 _cors = os.getenv("CORS_ORIGINS", "*")
 _cors_origins = [o.strip() for o in _cors.split(",") if o.strip()] or ["*"]
+# Native Capacitor app (Android/iOS WebView) origins — always allowed
+if "*" not in _cors_origins:
+    for _native_origin in ("https://localhost", "capacitor://localhost", "http://localhost"):
+        if _native_origin not in _cors_origins:
+            _cors_origins.append(_native_origin)
 
 app.add_middleware(
     CORSMiddleware,
