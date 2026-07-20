@@ -21,6 +21,13 @@ import {
   stopPersistentRepTracking,
 } from "../persistentRepTracking";
 
+function pickRate(batchVal, productVal) {
+  const batch = Number(batchVal);
+  if (Number.isFinite(batch) && batch > 0) return batch;
+  const product = Number(productVal);
+  return Number.isFinite(product) ? product : 0;
+}
+
 function aggregate(entry) {
   const batches = entry.batches || [];
   const stockHidden = batches.some((b) => b.stock_hidden);
@@ -35,8 +42,8 @@ function aggregate(entry) {
   return {
     available_qty: sumQty,
     stock_hidden: stockHidden,
-    mrp: latest?.mrp ?? entry.product.mrp,
-    ptr_rate: latest?.ptr_rate ?? entry.product.ptr_rate,
+    mrp: pickRate(latest?.mrp, entry.product.mrp),
+    ptr_rate: pickRate(latest?.ptr_rate, entry.product.ptr_rate),
     scheme: latest?.scheme_hidden ? "" : latest?.scheme || "",
   };
 }
@@ -354,6 +361,7 @@ export function RepOrder() {
         {selected && (
           <div className="selected-product-chip">
             Selected: <strong>{selected.entry.product.name}</strong>
+            {` · MRP ${inr(selected.aggregate.mrp)} · PTR ${inr(selected.aggregate.ptr_rate)}`}
             {selected.aggregate.available_qty != null
               ? ` · Avl ${selected.aggregate.available_qty}`
               : ""}
@@ -361,8 +369,15 @@ export function RepOrder() {
         )}
         {results.length > 0 && !selected && (
           <ul className="order-suggest" style={{ position: "relative" }}>
+            <li className="suggest-head suggest-row-rep">
+              <span className="suggest-col-name">Product</span>
+              <span className="suggest-col-stock">Stock</span>
+              <span className="suggest-col-price">MRP</span>
+              <span className="suggest-col-price">PTR</span>
+            </li>
             {results.map((row) => (
               <li
+                className="suggest-row-rep"
                 key={row.entry.product.id}
                 onMouseDown={(e) => {
                   e.preventDefault();
@@ -374,14 +389,22 @@ export function RepOrder() {
                 <div className="suggest-col-name">
                   <strong>{row.entry.product.name}</strong>
                   <span className="muted">
-                    {row.entry.product.manufacturer} ·{" "}
-                    {row.entry.product.pack_size}
+                    {row.entry.product.product_code
+                      ? `${row.entry.product.product_code} · `
+                      : ""}
+                    {row.entry.product.manufacturer}
+                    {row.entry.product.pack_size
+                      ? ` · ${row.entry.product.pack_size}`
+                      : ""}
                   </span>
                 </div>
                 <span className="suggest-col-stock">
                   {row.aggregate.available_qty == null
                     ? "—"
                     : `Avl ${row.aggregate.available_qty}`}
+                </span>
+                <span className="suggest-col-price">
+                  {inr(row.aggregate.mrp)}
                 </span>
                 <span className="suggest-col-price">
                   {inr(row.aggregate.ptr_rate)}
@@ -406,10 +429,12 @@ export function RepOrder() {
 
       {lines.length > 0 && (
         <div className="panel" style={{ marginTop: 16 }}>
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
                 <th>Product</th>
+                <th>MRP</th>
                 <th>PTR</th>
                 <th>Qty</th>
               </tr>
@@ -418,12 +443,14 @@ export function RepOrder() {
               {lines.map((l) => (
                 <tr key={l.entry.product.id}>
                   <td>{l.entry.product.name}</td>
+                  <td>{inr(l.aggregate.mrp)}</td>
                   <td>{inr(l.aggregate.ptr_rate)}</td>
                   <td>{l.qty}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
           <div className="cart-bar">
             <strong>Total {inr(total)}</strong>
             <button className="btn" disabled={placing} onClick={place}>

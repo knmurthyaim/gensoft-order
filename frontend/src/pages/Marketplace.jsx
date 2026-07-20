@@ -74,8 +74,18 @@ function aggregateEntry(entry, supplier, settings) {
     aggregate: {
       available_qty: sumQty,
       stock_hidden: stockHidden,
-      mrp: latest?.mrp ?? entry.product.mrp,
-      ptr_rate: latest?.ptr_rate ?? entry.product.ptr_rate,
+      mrp: (() => {
+        const batch = Number(latest?.mrp);
+        if (Number.isFinite(batch) && batch > 0) return batch;
+        const product = Number(entry.product.mrp);
+        return Number.isFinite(product) ? product : 0;
+      })(),
+      ptr_rate: (() => {
+        const batch = Number(latest?.ptr_rate);
+        if (Number.isFinite(batch) && batch > 0) return batch;
+        const product = Number(entry.product.ptr_rate);
+        return Number.isFinite(product) ? product : 0;
+      })(),
       scheme,
       batch_count: batches.length,
     },
