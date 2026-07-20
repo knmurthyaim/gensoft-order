@@ -6,6 +6,8 @@ from openpyxl import Workbook, load_workbook
 
 def normalize_header(h: str) -> str:
     key = (h or "").strip().lower().replace(" ", "_")
+    # Also collapse hyphens from some ERP exports
+    key = key.replace("-", "_")
     aliases = {
         "accounttype": "account_type",
         "business_name": "name",
@@ -47,6 +49,35 @@ def normalize_header(h: str) -> str:
         "owner": "owner_name",
         "dlno": "dl_no",
         "gstno": "gst_no",
+        # Rates — GenSoft / VFP / DBF often use short or truncated names
+        "ptr": "ptr_rate",
+        "ptrrate": "ptr_rate",
+        "ptr_rat": "ptr_rate",
+        "ptrate": "ptr_rate",
+        "retailer_price": "ptr_rate",
+        "retailerprice": "ptr_rate",
+        "retailerpr": "ptr_rate",
+        "retail_price": "ptr_rate",
+        "retprice": "ptr_rate",
+        "pts": "pts_rate",
+        "ptsrate": "pts_rate",
+        "pts_rat": "pts_rate",
+        "batch_ptr": "batch_ptr_rate",
+        "batch_ptr_": "batch_ptr_rate",  # DBF truncation of batch_ptr_rate
+        "batchptr": "batch_ptr_rate",
+        "batchptrra": "batch_ptr_rate",
+        "batch_mrp_": "batch_mrp",
+        "batchmrp": "batch_mrp",
+        "mrprate": "mrp",
+        "mrp_rate": "mrp",
+        "manufactur": "manufacturer",
+        "packsize": "pack_size",
+        "pack_siz": "pack_size",
+        "hsn": "hsn_code",
+        "batch": "batch_no",
+        "batchno": "batch_no",
+        "batch_num": "batch_no",
+        "batch_numb": "batch_no",
     }
     return aliases.get(key, key)
 

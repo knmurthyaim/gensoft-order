@@ -2299,6 +2299,37 @@ def _party_payload_unchanged(party: models.Party, payload: dict) -> bool:
     return True
 
 
+def _keep_existing_rate(existing, incoming) -> float:
+    """Prefer incoming when > 0; otherwise keep existing non-zero rate."""
+    try:
+        inc = float(incoming if incoming is not None else 0)
+    except (TypeError, ValueError):
+        inc = 0.0
+    if inc > 0:
+        return inc
+    try:
+        old = float(existing if existing is not None else 0)
+    except (TypeError, ValueError):
+        old = 0.0
+    return old if old > 0 else inc
+
+
+def _apply_product_payload(product: models.Product, payload: dict) -> None:
+    for k, v in payload.items():
+        if k in ("mrp", "ptr_rate", "pts_rate", "special_rate"):
+            setattr(product, k, _keep_existing_rate(getattr(product, k, 0), v))
+        else:
+            setattr(product, k, v)
+
+
+def _apply_batch_payload(batch: models.StockBatch, bdata: dict) -> None:
+    for k, v in bdata.items():
+        if k in ("mrp", "ptr_rate", "pts_rate"):
+            setattr(batch, k, _keep_existing_rate(getattr(batch, k, 0), v))
+        else:
+            setattr(batch, k, v)
+
+
 def _product_payload_unchanged(product: models.Product, payload: dict) -> bool:
     text_keys = (
         "product_code",
@@ -2313,7 +2344,15 @@ def _product_payload_unchanged(product: models.Product, payload: dict) -> bool:
         if _norm_txt(getattr(product, key, None)) != _norm_txt(payload.get(key)):
             return False
     for key in ("mrp", "ptr_rate", "pts_rate", "special_rate", "gst_pct"):
-        if not _same_num(getattr(product, key, 0), payload.get(key, 0)):
+        incoming = payload.get(key, 0)
+        # Missing/zero rate in Excel must not force a rewrite of a good rate
+        if key in ("mrp", "ptr_rate", "pts_rate", "special_rate"):
+            try:
+                if float(incoming or 0) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if not _same_num(getattr(product, key, 0), incoming):
             return False
     if bool(getattr(product, "is_on_hold", False)) != bool(
         payload.get("is_on_hold", False)
@@ -2332,7 +2371,13 @@ def _batch_payload_unchanged(batch: models.StockBatch, bdata: dict) -> bool:
     if int(batch.available_qty or 0) != int(bdata.get("available_qty") or 0):
         return False
     for key in ("mrp", "ptr_rate", "pts_rate"):
-        if not _same_num(getattr(batch, key, 0), bdata.get(key, 0)):
+        incoming = bdata.get(key, 0)
+        try:
+            if float(incoming or 0) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if not _same_num(getattr(batch, key, 0), incoming):
             return False
     if bool(batch.show_to_customer) != bool(bdata.get("show_to_customer", True)):
         return False
@@ -2624,8 +2669,7 @@ def upload_products_with_stock(
             touched = False
             if product:
                 if not _product_payload_unchanged(product, payload):
-                    for k, v in payload.items():
-                        setattr(product, k, v)
+                    _apply_product_payload(product, payload)
                     touched = True
             else:
                 product = models.Product(owner_account_id=account.id, **payload)
@@ -2649,20 +2693,19 @@ def upload_products_with_stock(
                 batch = batch_by_key.get((product.id, batch_no))
                 bdata = batch_item.model_dump()
                 bdata["batch_no"] = batch_no
-                bdata["mrp"] = bdata["mrp"] if bdata["mrp"] is not None else product.mrp
-                bdata["ptr_rate"] = (
-                    bdata["ptr_rate"] if bdata["ptr_rate"] is not None else product.ptr_rate
-                )
-                bdata["pts_rate"] = (
-                    bdata["pts_rate"] if bdata["pts_rate"] is not None else product.pts_rate
-                )
+                # Prefer explicit batch rate, else product rate, else keep existing
+                if bdata.get("mrp") is None or float(bdata.get("mrp") or 0) <= 0:
+                    bdata["mrp"] = product.mrp
+                if bdata.get("ptr_rate") is None or float(bdata.get("ptr_rate") or 0) <= 0:
+                    bdata["ptr_rate"] = product.ptr_rate
+                if bdata.get("pts_rate") is None or float(bdata.get("pts_rate") or 0) <= 0:
+                    bdata["pts_rate"] = product.pts_rate
                 if bdata.get("expiry_date"):
                     bdata["expiry_date"] = _month_end(bdata["expiry_date"])
                 if batch:
                     if _batch_payload_unchanged(batch, bdata):
                         continue
-                    for k, v in bdata.items():
-                        setattr(batch, k, v)
+                    _apply_batch_payload(batch, bdata)
                     touched = True
                 else:
                     new_batch = models.StockBatch(
@@ -2709,6 +2752,21 @@ def upload_products_with_stock(
     )
 
 
+def _row_float(row: dict, *keys, default: float = 0.0) -> float:
+    """First usable numeric value from row keys (skip blank / non-numeric)."""
+    for key in keys:
+        if key not in row:
+            continue
+        val = row.get(key)
+        if val is None or val == "":
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return float(default)
+
+
 def upload_products_from_excel_rows(
     db: Session,
     account: models.Account,
@@ -2723,6 +2781,13 @@ def upload_products_from_excel_rows(
         key = code or name
         if not key:
             continue
+        # Accept ptr / ptr_rate / retailer_price / batch_ptr_* (DBF aliases
+        # are normalized in excel_util; keep fallbacks here too).
+        row_mrp = _row_float(row, "mrp", "batch_mrp", "mrp_rate")
+        row_ptr = _row_float(
+            row, "ptr_rate", "batch_ptr_rate", "ptr", "retailer_price"
+        )
+        row_pts = _row_float(row, "pts_rate", "pts")
         if key not in grouped:
             grouped[key] = schemas.ProductStockUploadItem(
                 product_code=code,
@@ -2732,24 +2797,35 @@ def upload_products_from_excel_rows(
                 hsn_code=str(row.get("hsn_code", "")).strip(),
                 category=str(row.get("category", "General")).strip() or "General",
                 schedule=str(row.get("schedule", "")).strip(),
-                mrp=float(row.get("mrp", 0) or 0),
-                ptr_rate=float(row.get("ptr_rate", 0) or 0),
-                pts_rate=float(row.get("pts_rate", 0) or 0),
-                gst_pct=float(row.get("gst_pct", 12) or 12),
+                mrp=row_mrp,
+                ptr_rate=row_ptr,
+                pts_rate=row_pts,
+                gst_pct=_row_float(row, "gst_pct", "gst", default=12.0) or 12.0,
                 is_on_hold=str(row.get("is_on_hold", "")).lower() in ("1", "true", "yes"),
                 batches=[],
             )
             order.append(key)
+        else:
+            # Later batch rows often carry the real rates — lift product rates
+            # when the first row had blanks/zeros.
+            item = grouped[key]
+            if row_mrp > 0 and not (item.mrp or 0):
+                item.mrp = row_mrp
+            if row_ptr > 0 and not (item.ptr_rate or 0):
+                item.ptr_rate = row_ptr
+            if row_pts > 0 and not (item.pts_rate or 0):
+                item.pts_rate = row_pts
         qty = row.get("available_qty", 0)
+        batch_mrp = _row_float(row, "batch_mrp", "mrp")
+        batch_ptr = _row_float(row, "batch_ptr_rate", "ptr_rate", "ptr")
         grouped[key].batches.append(
             schemas.ProductBatchUploadItem(
                 batch_no=str(row.get("batch_no", "")).strip(),
                 expiry_date=_parse_expiry_date(row.get("expiry_date")),
                 available_qty=int(float(qty or 0)),
                 scheme=str(row.get("scheme", "")).strip(),
-                mrp=float(row.get("batch_mrp", row.get("mrp", 0)) or 0) or None,
-                ptr_rate=float(row.get("batch_ptr_rate", row.get("ptr_rate", 0)) or 0)
-                or None,
+                mrp=batch_mrp if batch_mrp > 0 else None,
+                ptr_rate=batch_ptr if batch_ptr > 0 else None,
                 show_to_customer=str(row.get("show_to_customer", "yes")).lower()
                 not in ("0", "false", "no"),
             )
