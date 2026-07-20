@@ -20,6 +20,7 @@ import {
   startPersistentRepTracking,
   stopPersistentRepTracking,
 } from "../persistentRepTracking";
+import { mapsUrl } from "../maps";
 
 function pickRate(batchVal, productVal) {
   const batch = Number(batchVal);
@@ -71,9 +72,6 @@ export function RepCustomers() {
     reload("", 25);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const mapsUrl = (lat, lng) =>
-    `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
 
   const tagLocation = (p, e) => {
     e.preventDefault();

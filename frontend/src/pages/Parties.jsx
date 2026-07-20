@@ -3,6 +3,7 @@ import Modal from "../components/Modal.jsx";
 import { getDirectory, parties as partiesApi, salesReps as repApi } from "../api";
 import { useAuth } from "../AuthContext.jsx";
 import { inr } from "../format";
+import { mapsUrl } from "../maps";
 
 const empty = {
   code: "",
@@ -116,9 +117,6 @@ export default function Parties() {
       setError(err.response?.data?.detail || "Could not remove location.");
     }
   };
-
-  const mapsUrl = (lat, lng) =>
-    `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
 
   const openLink = (p) => {
     setLinkRow(p);

@@ -2152,12 +2152,33 @@ textarea {
   background: #fff;
 }
 
+.rep-track-map-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .rep-track-map {
   width: 100%;
   height: 460px;
   border: 1px solid var(--border);
   border-radius: 8px;
   z-index: 0;
+}
+
+.rep-track-map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.rep-track-map.empty-map {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: #f8fafc;
 }
 
 .rep-track-trail-title {

@@ -1,11 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { salesReps } from "../api";
 import { fmtDateTime, parseApiDate, INDIA_TZ } from "../format";
-
-function mapsUrl(lat, lng) {
-  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`;
-}
+import { mapsUrl, mapsRouteUrl, mapsEmbedUrl } from "../maps";
 
 function ageLabel(minutes) {
   if (minutes == null) return "No signal yet";
@@ -45,36 +42,7 @@ function todayKeyIST() {
   return dayKeyIST(new Date().toISOString());
 }
 
-function loadLeaflet() {
-  if (window.L) return Promise.resolve(window.L);
-  return new Promise((resolve, reject) => {
-    const cssHref = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    if (![...document.styleSheets].some((s) => s.href === cssHref)) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = cssHref;
-      document.head.appendChild(link);
-    }
-    const existing = document.querySelector("script[data-leaflet]");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.L));
-      existing.addEventListener("error", reject);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.dataset.leaflet = "1";
-    script.onload = () => resolve(window.L);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
 function DayRouteMap({ points }) {
-  const containerRef = useRef(null);
-  const mapRef = useRef(null);
-  const layerRef = useRef(null);
-
   const ordered = useMemo(() => {
     return [...(points || [])].sort(
       (a, b) =>
@@ -83,91 +51,37 @@ function DayRouteMap({ points }) {
     );
   }, [points]);
 
-  useEffect(() => {
-    let cancelled = false;
+  if (!ordered.length) {
+    return <div className="rep-track-map empty-map">No points to show.</div>;
+  }
 
-    async function draw() {
-      if (!containerRef.current) return;
-      const L = await loadLeaflet();
-      if (cancelled || !containerRef.current) return;
+  const last = ordered[ordered.length - 1];
+  const first = ordered[0];
+  const routeHref = mapsRouteUrl(ordered);
 
-      if (!mapRef.current) {
-        mapRef.current = L.map(containerRef.current, {
-          zoomControl: true,
-          attributionControl: true,
-        });
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: "&copy; OpenStreetMap",
-        }).addTo(mapRef.current);
-      }
-
-      if (layerRef.current) {
-        mapRef.current.removeLayer(layerRef.current);
-        layerRef.current = null;
-      }
-
-      const group = L.layerGroup().addTo(mapRef.current);
-      layerRef.current = group;
-
-      if (!ordered.length) {
-        mapRef.current.setView([17.385, 78.4867], 12);
-        return;
-      }
-
-      const latLngs = ordered.map((p) => [p.latitude, p.longitude]);
-      if (latLngs.length >= 2) {
-        L.polyline(latLngs, {
-          color: "#1565c0",
-          weight: 4,
-          opacity: 0.9,
-          lineJoin: "round",
-        }).addTo(group);
-      }
-
-      ordered.forEach((p, i) => {
-        const isStart = i === 0;
-        const isEnd = i === ordered.length - 1;
-        const color = isStart ? "#2e7d32" : isEnd ? "#c62828" : "#1565c0";
-        const radius = isStart || isEnd ? 7 : 4;
-        L.circleMarker([p.latitude, p.longitude], {
-          radius,
-          color,
-          fillColor: color,
-          fillOpacity: 0.95,
-          weight: 2,
-        })
-          .bindPopup(
-            `${fmtDateTime(p.recorded_at)} IST<br/>${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`
-          )
-          .addTo(group);
-      });
-
-      if (latLngs.length === 1) {
-        mapRef.current.setView(latLngs[0], 15);
-      } else {
-        mapRef.current.fitBounds(L.latLngBounds(latLngs), { padding: [28, 28] });
-      }
-      setTimeout(() => mapRef.current?.invalidateSize(), 50);
-    }
-
-    draw().catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [ordered]);
-
-  useEffect(() => {
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        layerRef.current = null;
-      }
-    };
-  }, []);
-
-  return <div ref={containerRef} className="rep-track-map" />;
+  return (
+    <div className="rep-track-map-wrap">
+      <iframe
+        title="Google Maps location"
+        className="rep-track-map"
+        src={mapsEmbedUrl(last.latitude, last.longitude, ordered.length > 1 ? 13 : 15)}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        allowFullScreen
+      />
+      <div className="rep-track-map-actions">
+        <a className="btn sm" href={routeHref} target="_blank" rel="noreferrer">
+          {ordered.length > 1 ? "Open day route in Google Maps" : "Open in Google Maps"}
+        </a>
+        {ordered.length > 1 && (
+          <span className="muted" style={{ fontSize: 12 }}>
+            Start {fmtDateTime(first.recorded_at)} → Latest{" "}
+            {fmtDateTime(last.recorded_at)} IST · {ordered.length} points
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function RepTracking() {
@@ -257,7 +171,7 @@ export default function RepTracking() {
         <div>
           <h1 className="page-title">Rep Location</h1>
           <p className="page-sub">
-            Select a day to draw that day&apos;s route line on the map (IST).
+            Select a day to view that day&apos;s locations on Google Maps (IST).
             Phone checks every 30 seconds and saves only moves of 50m+. History
             7 days. Enable in{" "}
             <Link to="/settings">Settings → Sales Rep Tracking</Link>.
@@ -363,14 +277,11 @@ export default function RepTracking() {
                 {dayPoints.length > 0 && (
                   <a
                     className="btn sm"
-                    href={mapsUrl(
-                      dayPoints[dayPoints.length - 1].latitude,
-                      dayPoints[dayPoints.length - 1].longitude
-                    )}
+                    href={mapsRouteUrl(dayPoints)}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Open map
+                    Open in Google Maps
                   </a>
                 )}
               </div>
