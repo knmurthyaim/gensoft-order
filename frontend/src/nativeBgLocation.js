@@ -38,7 +38,9 @@ export async function startNativeBackgroundTracking(opts) {
     watcherId = null;
   }
 
-  const minMove = Math.max(10, Number(opts.minMoveMeters) || 50);
+  // Keep Android distanceFilter small so we get regular fixes; server
+  // applies the real movement threshold before storing trail points.
+  const minMove = Math.min(10, Math.max(5, Number(opts.minMoveMeters) || 10));
   watcherId = await BackgroundGeolocation.addWatcher(
     {
       backgroundMessage:

@@ -232,10 +232,10 @@ def post_location(
 @router.post("/location/batch", response_model=schemas.RepLocationBatchResult)
 def post_location_batch(
     data: schemas.RepLocationBatch,
-    user: models.User = Depends(get_current_user),
+    user: models.User = Depends(get_location_user),
     db: Session = Depends(get_db),
 ):
-    """Upload offline-queued GPS points when the phone comes online."""
+    """Accept offline-queued GPS points from app or native service."""
     _require_rep(user)
     try:
         return crud.record_rep_locations_batch(db, user, data)

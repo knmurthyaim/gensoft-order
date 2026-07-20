@@ -340,7 +340,8 @@ def delete_sales_rep(db: Session, account, rep_id) -> bool:
 
 LOCATION_RETENTION_DAYS = 7
 LOCATION_INTERVAL_SEC = 30  # check GPS every 30 seconds
-LOCATION_MIN_MOVE_METERS = 50  # only store if moved ~50m from last point
+LOCATION_MIN_MOVE_METERS = 50  # only store new trail points if moved ~50m
+LOCATION_HEARTBEAT_SEC = 5 * 60  # refresh "last seen" even if stationary
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -420,6 +421,20 @@ def record_rep_location(
     if last:
         dist = _haversine_m(last.latitude, last.longitude, lat, lng)
         if dist < LOCATION_MIN_MOVE_METERS:
+            # Stationary: don't add a trail point, but refresh last-seen so
+            # distributors can tell the phone is still sharing location.
+            last_at = last.recorded_at
+            if last_at is not None and last_at.tzinfo is None:
+                last_at = last_at.replace(tzinfo=timezone.utc)
+            age_sec = (
+                (recorded - last_at).total_seconds() if last_at is not None else 99999
+            )
+            if age_sec >= LOCATION_HEARTBEAT_SEC:
+                last.recorded_at = recorded
+                if data.accuracy_m is not None:
+                    last.accuracy_m = float(data.accuracy_m)
+                db.commit()
+                db.refresh(last)
             return last
 
     ping = models.SalesRepLocation(
@@ -491,6 +506,23 @@ def record_rep_locations_batch(
         lng = float(item.longitude)
         if last_lat is not None and last_lng is not None:
             if _haversine_m(last_lat, last_lng, lat, lng) < LOCATION_MIN_MOVE_METERS:
+                # Refresh last-seen heartbeat on the newest row when stationary.
+                if last is not None and saved == 0:
+                    last_at = last.recorded_at
+                    if last_at is not None and last_at.tzinfo is None:
+                        last_at = last_at.replace(tzinfo=timezone.utc)
+                    age_sec = (
+                        (recorded - last_at).total_seconds()
+                        if last_at is not None
+                        else 99999
+                    )
+                    if age_sec >= LOCATION_HEARTBEAT_SEC:
+                        last.recorded_at = recorded
+                        if item.accuracy_m is not None:
+                            last.accuracy_m = float(item.accuracy_m)
+                        saved += 1  # count as persisted heartbeat
+                        last = None  # only one heartbeat per batch
+                        continue
                 skipped += 1
                 continue
         ping = models.SalesRepLocation(
@@ -504,6 +536,7 @@ def record_rep_locations_batch(
             recorded_at=recorded,
         )
         db.add(ping)
+        last = ping
         last_lat, last_lng = lat, lng
         saved += 1
 

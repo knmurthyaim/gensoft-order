@@ -886,6 +886,8 @@ export function RepShell({ children }) {
       // Prefer native background GPS (works when app is minimized / screen off)
       const native = await isNativeApp();
       if (native) {
+        // Request permissions via community plugin first, then hand off to the
+        // persistent foreground service (survives app close).
         const res = await startNativeBackgroundTracking({
           minMoveMeters,
           onPoint: (p) => savePoint(p),
@@ -904,7 +906,7 @@ export function RepShell({ children }) {
               intervalSec: intervalMs / 1000,
               minMoveMeters,
             });
-            // The persistent native service now owns location updates.
+            // Avoid duplicate Android location notifications while app is open.
             await stopNativeBackgroundTracking();
           } catch {
             // Keep the community watcher as fallback while the app process lives.
@@ -912,12 +914,11 @@ export function RepShell({ children }) {
         }
       }
 
-      if (!usingNative) {
-        // Browser: needs app open / in memory. Still saves offline + SW syncs later.
-        captureLocal();
-        if (timer) clearInterval(timer);
-        timer = setInterval(tick, intervalMs);
-      }
+      // Always keep an in-app timer too — covers web, and acts as backup on
+      // Android while the rep has the app open (persistent service covers close).
+      captureLocal();
+      if (timer) clearInterval(timer);
+      timer = setInterval(tick, intervalMs);
 
       try {
         const reg = await navigator.serviceWorker?.ready;
@@ -935,7 +936,6 @@ export function RepShell({ children }) {
       if (document.visibilityState !== "visible" || cancelled) return;
       requestWake();
       syncToCloud();
-      if (usingNative) return;
       let last = lastCaptureMs;
       try {
         last = parseInt(localStorage.getItem(LAST_KEY) || "0", 10) || last;

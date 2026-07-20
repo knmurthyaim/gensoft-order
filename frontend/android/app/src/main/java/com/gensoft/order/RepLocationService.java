@@ -11,7 +11,9 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
@@ -23,6 +25,7 @@ import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
+import com.google.android.gms.tasks.CancellationTokenSource;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -47,11 +50,21 @@ public class RepLocationService extends Service {
     private static final String CHANNEL_ID = "gensoft_rep_location";
     private static final int NOTIFICATION_ID = 4107;
     private static final int MAX_QUEUE = 500;
+    private static final long FLUSH_INTERVAL_MS = 45_000L;
 
     private SharedPreferences prefs;
     private FusedLocationProviderClient fusedClient;
     private LocationCallback callback;
     private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable flushRunnable = new Runnable() {
+        @Override
+        public void run() {
+            networkExecutor.execute(RepLocationService.this::flushQueue);
+            requestFreshLocation();
+            handler.postDelayed(this, FLUSH_INTERVAL_MS);
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -66,6 +79,7 @@ public class RepLocationService extends Service {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             prefs.edit().clear().apply();
             stopLocationUpdates();
+            handler.removeCallbacks(flushRunnable);
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -92,28 +106,36 @@ public class RepLocationService extends Service {
 
         startForeground(NOTIFICATION_ID, buildNotification());
         startLocationUpdates();
+        requestImmediateLocation();
         networkExecutor.execute(this::flushQueue);
+        handler.removeCallbacks(flushRunnable);
+        handler.postDelayed(flushRunnable, FLUSH_INTERVAL_MS);
         return START_STICKY;
     }
 
+    private boolean hasLocationPermission() {
+        return ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED
+            || ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void startLocationUpdates() {
-        if (
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED
-            && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!hasLocationPermission()) {
             return;
         }
         stopLocationUpdates();
         long intervalMs = Math.max(15, prefs.getInt("intervalSec", 30)) * 1000L;
-        float minDistance = Math.max(10, prefs.getInt("minMoveMeters", 50));
+        // Time-based updates only — server filters by movement distance.
+        // A large Android distance filter previously meant zero callbacks while
+        // a rep stayed in one shop, so the distributor never saw updates.
         LocationRequest request = new LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
             intervalMs
         )
             .setMinUpdateIntervalMillis(Math.max(10000L, intervalMs / 2))
-            .setMinUpdateDistanceMeters(minDistance)
+            .setMinUpdateDistanceMeters(0f)
+            .setMaxUpdateDelayMillis(intervalMs * 2)
             .build();
         callback = new LocationCallback() {
             @Override
@@ -131,6 +153,47 @@ public class RepLocationService extends Service {
         }
     }
 
+    private void requestImmediateLocation() {
+        if (!hasLocationPermission()) return;
+        try {
+            fusedClient.getLastLocation()
+                .addOnSuccessListener(location -> {
+                    if (location != null) {
+                        enqueue(location);
+                        networkExecutor.execute(this::flushQueue);
+                    }
+                    requestFreshLocation();
+                });
+        } catch (SecurityException ignored) {
+        }
+    }
+
+    private void requestFreshLocation() {
+        if (!hasLocationPermission()) return;
+        try {
+            CancellationTokenSource cts = new CancellationTokenSource();
+            fusedClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                cts.getToken()
+            ).addOnSuccessListener(location -> {
+                if (location != null) {
+                    enqueue(location);
+                    networkExecutor.execute(this::flushQueue);
+                }
+            });
+        } catch (SecurityException ignored) {
+        }
+    }
+
+    private long fixLocationTime(Location location) {
+        long t = location.getTime();
+        long now = System.currentTimeMillis();
+        if (t <= 0 || Math.abs(now - t) > 24L * 3600L * 1000L) {
+            return now;
+        }
+        return t;
+    }
+
     private synchronized void enqueue(Location location) {
         try {
             JSONArray queue = new JSONArray(prefs.getString("queue", "[]"));
@@ -142,8 +205,12 @@ public class RepLocationService extends Service {
             JSONObject point = new JSONObject();
             point.put("latitude", location.getLatitude());
             point.put("longitude", location.getLongitude());
-            point.put("accuracy_m", location.hasAccuracy() ? location.getAccuracy() : JSONObject.NULL);
-            point.put("recorded_at", isoTime(location.getTime()));
+            if (location.hasAccuracy()) {
+                point.put("accuracy_m", location.getAccuracy());
+            } else {
+                point.put("accuracy_m", JSONObject.NULL);
+            }
+            point.put("recorded_at", isoTime(fixLocationTime(location)));
             queue.put(point);
             prefs.edit().putString("queue", queue.toString()).apply();
         } catch (Exception ignored) {
@@ -164,6 +231,9 @@ public class RepLocationService extends Service {
                         .putBoolean("enabled", false)
                         .putString("queue", "[]")
                         .apply();
+                    handler.removeCallbacks(flushRunnable);
+                    stopLocationUpdates();
+                    stopForeground(true);
                     stopSelf();
                     return;
                 }
@@ -262,6 +332,7 @@ public class RepLocationService extends Service {
 
     @Override
     public void onDestroy() {
+        handler.removeCallbacks(flushRunnable);
         stopLocationUpdates();
         networkExecutor.shutdown();
         super.onDestroy();
