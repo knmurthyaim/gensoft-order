@@ -28,11 +28,16 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      stopPersistentRepTracking();
       tokenStore.clear();
       setUser(null);
       setAccount(null);
       setSalesRep(null);
+      try {
+        localStorage.setItem("gensoft_rep_track_enabled", "0");
+      } catch {
+        /* ignore */
+      }
+      stopPersistentRepTracking();
     });
     if (tokenStore.get()) {
       loadMe();
@@ -48,11 +53,18 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    stopPersistentRepTracking();
+    // Clear session first so UI always returns to login even if native
+    // tracking stop is slow or hangs.
     tokenStore.clear();
     setUser(null);
     setAccount(null);
     setSalesRep(null);
+    try {
+      localStorage.setItem("gensoft_rep_track_enabled", "0");
+    } catch {
+      /* ignore */
+    }
+    stopPersistentRepTracking();
   };
 
   return (

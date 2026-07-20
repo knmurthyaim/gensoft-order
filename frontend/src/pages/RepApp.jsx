@@ -1038,9 +1038,11 @@ export function RepShell({ children }) {
     }
   }, [locStatus]);
 
-  const logoutRep = async () => {
-    await stopPersistentRepTracking();
+  const logoutRep = () => {
+    // Clear auth immediately — do not await native stop (it can hang).
     logout();
+    stopPersistentRepTracking();
+    stopNativeBackgroundTracking();
   };
 
   return (
@@ -1057,13 +1059,14 @@ export function RepShell({ children }) {
         </div>
         <div className="rep-header-actions">
           <button
+            type="button"
             className="logout-btn"
             onClick={() => setShowPassword(true)}
             title="Change password"
           >
             Password
           </button>
-          <button className="logout-btn" onClick={logoutRep}>
+          <button type="button" className="logout-btn" onClick={logoutRep}>
             Logout
           </button>
         </div>

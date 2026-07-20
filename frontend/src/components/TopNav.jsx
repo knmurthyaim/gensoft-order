@@ -195,13 +195,14 @@ export default function TopNav() {
           </div>
           <span className="zennx-avatar">{initial}</span>
           <button
+            type="button"
             className="logout-btn"
             onClick={() => setShowPassword(true)}
             title="Change password"
           >
             Password
           </button>
-          <button className="logout-btn" onClick={logout} title="Logout">
+          <button type="button" className="logout-btn" onClick={logout} title="Logout">
             Logout
           </button>
         </div>
