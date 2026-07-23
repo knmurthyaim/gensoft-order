@@ -28,7 +28,13 @@ export async function startNativeBackgroundTracking(opts) {
   const native = await isNativeApp();
   if (!native) return { started: false, reason: "web" };
 
-  const BackgroundGeolocation = await getBackgroundGeolocation();
+  let BackgroundGeolocation;
+  try {
+    BackgroundGeolocation = await getBackgroundGeolocation();
+  } catch {
+    return { started: false, reason: "plugin_unavailable" };
+  }
+
   if (watcherId) {
     try {
       await BackgroundGeolocation.removeWatcher({ id: watcherId });
@@ -41,30 +47,35 @@ export async function startNativeBackgroundTracking(opts) {
   // Keep Android distanceFilter small so we get regular fixes; server
   // applies the real movement threshold before storing trail points.
   const minMove = Math.min(10, Math.max(5, Number(opts.minMoveMeters) || 10));
-  watcherId = await BackgroundGeolocation.addWatcher(
-    {
-      backgroundMessage:
-        "GenSoft is saving your location for your distributor.",
-      backgroundTitle: "GenSoft location",
-      requestPermissions: true,
-      stale: false,
-      distanceFilter: minMove,
-    },
-    (location, error) => {
-      if (error) {
-        opts.onError?.(error);
-        return;
+  try {
+    watcherId = await BackgroundGeolocation.addWatcher(
+      {
+        backgroundMessage:
+          "GenSoft is saving your location for your distributor.",
+        backgroundTitle: "GenSoft location",
+        requestPermissions: true,
+        stale: false,
+        distanceFilter: minMove,
+      },
+      (location, error) => {
+        if (error) {
+          opts.onError?.(error);
+          return;
+        }
+        if (!location) return;
+        opts.onPoint({
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy_m:
+            typeof location.accuracy === "number" ? location.accuracy : null,
+          recorded_at: new Date(location.time || Date.now()).toISOString(),
+        });
       }
-      if (!location) return;
-      opts.onPoint({
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracy_m:
-          typeof location.accuracy === "number" ? location.accuracy : null,
-        recorded_at: new Date(location.time || Date.now()).toISOString(),
-      });
-    }
-  );
+    );
+  } catch (err) {
+    opts.onError?.(err);
+    return { started: false, reason: "start_failed" };
+  }
   return { started: true, watcherId };
 }
 

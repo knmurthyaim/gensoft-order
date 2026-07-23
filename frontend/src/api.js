@@ -48,7 +48,7 @@ export const setUnauthorizedHandler = (fn) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401 && onUnauthorized) onUnauthorized();
+    if (err.response?.status === 401 && onUnauthorized) onUnauthorized(err);
     return Promise.reject(err);
   }
 );

@@ -1056,35 +1056,43 @@ export function RepShell({ children }) {
       // Prefer native background GPS (works when app is minimized / screen off)
       const native = await isNativeApp();
       if (native) {
-        // Request permissions via community plugin first, then hand off to the
-        // persistent foreground service (survives app close).
-        const res = await startNativeBackgroundTracking({
-          minMoveMeters,
-          onPoint: (p) => savePoint(p),
-          onError: (err) => {
-            if (cancelled) return;
-            if (err?.code === "NOT_AUTHORIZED") setLocStatus("denied");
-          },
-        });
-        usingNative = !!res.started;
-        if (usingNative) {
-          try {
-            const auth = await repApi.trackingToken();
-            await startPersistentRepTracking({
-              token: auth.tracking_token,
-              apiBase: getApiBase(),
-              intervalSec: intervalMs / 1000,
-              minMoveMeters,
-            });
+        // 1) Community watcher — also prompts for location permission.
+        try {
+          const res = await startNativeBackgroundTracking({
+            minMoveMeters,
+            onPoint: (p) => savePoint(p),
+            onError: (err) => {
+              if (cancelled) return;
+              if (err?.code === "NOT_AUTHORIZED") setLocStatus("denied");
+            },
+          });
+          usingNative = !!res.started;
+        } catch (err) {
+          usingNative = false;
+          if (err?.code === "NOT_AUTHORIZED") setLocStatus("denied");
+        }
+
+        // 2) Persistent foreground service — must start even if (1) fails,
+        // so tracking continues after the app is closed.
+        try {
+          const authTok = await repApi.trackingToken();
+          const started = await startPersistentRepTracking({
+            token: authTok.tracking_token,
+            apiBase: getApiBase(),
+            intervalSec: intervalMs / 1000,
+            minMoveMeters,
+          });
+          if (started?.started && usingNative) {
             // Avoid duplicate Android location notifications while app is open.
             await stopNativeBackgroundTracking();
-          } catch {
-            // Keep the community watcher as fallback while the app process lives.
+            usingNative = false;
           }
+        } catch {
+          // Keep the community watcher (if any) while the app process lives.
         }
       }
 
-      // Always keep an in-app timer too — covers web, and acts as backup on
+      // Always keep an in-app timer — covers web, and acts as backup on
       // Android while the rep has the app open (persistent service covers close).
       captureLocal();
       if (timer) clearInterval(timer);
@@ -1135,7 +1143,14 @@ export function RepShell({ children }) {
           setLocStatus("off");
           return;
         }
-        startTracking(cfg);
+        startTracking(cfg).catch(() => {
+          if (cancelled) return;
+          // Native plugin failures must not leave the rep with zero tracking.
+          setLocStatus(navigator.geolocation ? "pending" : "error");
+          captureLocal();
+          if (timer) clearInterval(timer);
+          timer = setInterval(tick, intervalMs);
+        });
         document.addEventListener("visibilitychange", onVisibility);
         window.addEventListener("online", onOnline);
       })
@@ -1199,6 +1214,15 @@ export function RepShell({ children }) {
             {salesRep?.name || user?.name} · {account?.name}
             {locStatus === "denied" && (
               <span className="rep-loc-badge warn"> · Location blocked</span>
+            )}
+            {locStatus === "off" && (
+              <span className="rep-loc-badge warn"> · Location off (ask distributor)</span>
+            )}
+            {(locStatus === "sharing" || locStatus === "pending") && (
+              <span className="rep-loc-badge ok"> · Location on</span>
+            )}
+            {locStatus === "error" && (
+              <span className="rep-loc-badge warn"> · Location error</span>
             )}
           </div>
         </div>

@@ -2102,6 +2102,10 @@ textarea {
   color: #c62828;
 }
 
+.rep-loc-badge.ok {
+  color: #2e7d32;
+}
+
 .rep-track-layout {
   display: grid;
   grid-template-columns: minmax(200px, 0.75fr) minmax(360px, 1.8fr);

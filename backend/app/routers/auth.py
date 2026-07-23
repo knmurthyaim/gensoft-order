@@ -39,7 +39,13 @@ def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account disabled")
-    token = create_access_token({"sub": str(user.id), "role": user.role})
+    # Sales reps stay signed in until they tap Logout (long-lived token).
+    # Other roles keep the default shorter session.
+    expires = (60 * 24 * 365) if user.role == "rep" else None
+    token = create_access_token(
+        {"sub": str(user.id), "role": user.role},
+        expires_minutes=expires,
+    )
     return schemas.Token(access_token=token)
 
 
