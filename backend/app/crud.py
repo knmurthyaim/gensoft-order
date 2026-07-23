@@ -853,7 +853,11 @@ def get_products(
     account: models.Account,
     search: Optional[str] = None,
     limit: int = 25,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ):
+    from sqlalchemy import func, select
+
     limit = max(1, min(int(limit or 25), 100))
     q = db.query(models.Product).filter(
         models.Product.owner_account_id == account.id
@@ -867,10 +871,39 @@ def get_products(
                 models.Product.manufacturer.ilike(term),
             )
         )
-    return [
-        _attach_stock(p)
-        for p in q.order_by(models.Product.name).limit(limit).all()
-    ]
+
+    desc = (sort_dir or "asc").lower() == "desc"
+    key = (sort_by or "name").lower()
+    col_map = {
+        "code": models.Product.product_code,
+        "name": models.Product.name,
+        "schedule": models.Product.schedule,
+        "mrp": models.Product.mrp,
+        "ptr": models.Product.ptr_rate,
+        "pts": models.Product.pts_rate,
+        "special": models.Product.special_rate,
+        "gst": models.Product.gst_pct,
+        "hold": models.Product.is_on_hold,
+    }
+
+    if key == "stock":
+        stock_sum = (
+            select(func.coalesce(func.sum(models.StockBatch.available_qty), 0))
+            .where(models.StockBatch.product_id == models.Product.id)
+            .correlate(models.Product)
+            .scalar_subquery()
+        )
+        order = stock_sum.desc() if desc else stock_sum.asc()
+        rows = q.order_by(order, models.Product.name.asc()).limit(limit).all()
+    else:
+        col = col_map.get(key, models.Product.name)
+        order = col.desc() if desc else col.asc()
+        if key != "name":
+            rows = q.order_by(order, models.Product.name.asc()).limit(limit).all()
+        else:
+            rows = q.order_by(order).limit(limit).all()
+
+    return [_attach_stock(p) for p in rows]
 
 
 def get_product(db: Session, account: models.Account, product_id: int):

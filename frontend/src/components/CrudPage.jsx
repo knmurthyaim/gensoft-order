@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal.jsx";
+import { SortTh, nextSort } from "./SortTh.jsx";
 
 function emptyFromFields(fields) {
   const obj = {};
@@ -14,9 +15,10 @@ function emptyFromFields(fields) {
  * props:
  *  - title, subtitle, addLabel
  *  - resource: { list, create, update, remove } from api.js
- *  - columns: [{ header, render(row) }]
+ *  - columns: [{ header, render(row), sort? }]  // sort = API sort_by key
  *  - fields: [{ name, label, type, default, required, options, half }]
  *  - searchable (bool)
+ *  - defaultSortBy / defaultSortDir (when any column has sort)
  */
 export default function CrudPage({
   title,
@@ -27,27 +29,48 @@ export default function CrudPage({
   fields,
   searchable = true,
   serverLimited = false,
+  defaultSortBy = "name",
+  defaultSortDir = "asc",
 }) {
+  const sortable = columns.some((c) => c.sort);
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState(defaultSortBy);
+  const [sortDir, setSortDir] = useState(defaultSortDir);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyFromFields(fields));
   const [error, setError] = useState("");
 
-  const load = (q = appliedSearch, rowLimit = limit) => {
+  const load = (
+    q = appliedSearch,
+    rowLimit = limit,
+    by = sortBy,
+    dir = sortDir
+  ) => {
     setLoading(true);
     const params = {};
     if (searchable && q) params.search = q;
     if (serverLimited) params.limit = rowLimit;
+    if (sortable) {
+      params.sort_by = by;
+      params.sort_dir = dir;
+    }
     return resource
       .list(Object.keys(params).length ? params : undefined)
       .then(setRows)
       .catch(() => setError("Failed to load data."))
       .finally(() => setLoading(false));
+  };
+
+  const onSort = (col) => {
+    const next = nextSort(sortBy, sortDir, col);
+    setSortBy(next.sortBy);
+    setSortDir(next.sortDir);
+    load(appliedSearch, limit, next.sortBy, next.sortDir);
   };
 
   useEffect(() => {
@@ -161,7 +184,11 @@ export default function CrudPage({
 
       {serverLimited && (
         <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-          {loading ? "Loading…" : `Showing ${rows.length} rows. Search to find other records.`}
+          {loading
+            ? "Loading…"
+            : `Showing ${rows.length} rows. Search to find other records.${
+                sortable ? " Click headers to sort." : ""
+              }`}
         </p>
       )}
 
@@ -169,9 +196,20 @@ export default function CrudPage({
         <table>
           <thead>
             <tr>
-              {columns.map((c) => (
-                <th key={c.header}>{c.header}</th>
-              ))}
+              {columns.map((c) =>
+                c.sort ? (
+                  <SortTh
+                    key={c.header}
+                    label={c.header}
+                    col={c.sort}
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                  />
+                ) : (
+                  <th key={c.header}>{c.header}</th>
+                )
+              )}
               <th></th>
             </tr>
           </thead>

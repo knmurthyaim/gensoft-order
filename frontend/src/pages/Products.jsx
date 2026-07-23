@@ -6,14 +6,17 @@ export default function Products() {
   return (
     <CrudPage
       title="My Products"
-      subtitle="Your product master with MRP, PTR, PTS, special rate and GST"
+      subtitle="Your product master with MRP, PTR, PTS, special rate and GST. Click headers to sort (default: name)."
       addLabel="+ Add Product"
       resource={products}
       serverLimited
+      defaultSortBy="name"
+      defaultSortDir="asc"
       columns={[
-        { header: "Code", render: (r) => r.product_code || "—" },
+        { header: "Code", sort: "code", render: (r) => r.product_code || "—" },
         {
           header: "Product",
+          sort: "name",
           render: (r) => (
             <>
               <strong>{r.name}</strong>
@@ -23,18 +26,20 @@ export default function Products() {
             </>
           ),
         },
-        { header: "Sch.", render: (r) => r.schedule || "—" },
-        { header: "MRP", render: (r) => inr(r.mrp) },
-        { header: "PTR", render: (r) => inr(r.ptr_rate) },
-        { header: "PTS", render: (r) => inr(r.pts_rate) },
-        { header: "Special", render: (r) => inr(r.special_rate) },
-        { header: "GST%", render: (r) => `${r.gst_pct}%` },
+        { header: "Sch.", sort: "schedule", render: (r) => r.schedule || "—" },
+        { header: "MRP", sort: "mrp", render: (r) => inr(r.mrp) },
+        { header: "PTR", sort: "ptr", render: (r) => inr(r.ptr_rate) },
+        { header: "PTS", sort: "pts", render: (r) => inr(r.pts_rate) },
+        { header: "Special", sort: "special", render: (r) => inr(r.special_rate) },
+        { header: "GST%", sort: "gst", render: (r) => `${r.gst_pct}%` },
         {
           header: "Hold",
+          sort: "hold",
           render: (r) => (r.is_on_hold ? "Yes" : "—"),
         },
         {
           header: "Stock",
+          sort: "stock",
           render: (r) => (
             <span className={r.total_stock < 10 ? "low-stock" : ""}>
               {r.total_stock}

@@ -56,10 +56,12 @@ PRODUCT_SAMPLE_ROW = [
 def list_products(
     search: Optional[str] = None,
     limit: int = Query(25, ge=1, le=100),
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    return crud.get_products(db, account, search, limit)
+    return crud.get_products(db, account, search, limit, sort_by, sort_dir)
 
 
 @router.get("/upload/template")
