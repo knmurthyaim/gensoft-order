@@ -51,6 +51,44 @@ def list_outstanding(
     return schemas.OutstandingListResponse(summary=summary, rows=rows)
 
 
+@router.get("/parties", response_model=schemas.OutstandingPartyListResponse)
+def list_outstanding_parties(
+    search: Optional[str] = None,
+    positive_only: bool = True,
+    limit: int = Query(25, ge=1, le=100),
+    account: models.Account = Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    """Party-wise outstanding summary (code, name, place, bills, balance)."""
+    return crud.get_outstanding_parties(
+        db, account, search=search, positive_only=positive_only, limit=limit
+    )
+
+
+@router.get("/bills", response_model=schemas.OutstandingListResponse)
+def list_outstanding_party_bills(
+    party_id: str = "",
+    party_name: str = "",
+    positive_only: bool = True,
+    limit: int = Query(500, ge=1, le=1000),
+    account: models.Account = Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    """Bill-wise outstanding for one party."""
+    try:
+        summary, rows = crud.get_outstanding_party_bills(
+            db,
+            account,
+            party_id=party_id,
+            party_name=party_name,
+            positive_only=positive_only,
+            limit=limit,
+        )
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return schemas.OutstandingListResponse(summary=summary, rows=rows)
+
+
 @router.get("/upload/template")
 def download_outstanding_template(
     account: models.Account = Depends(get_current_account),

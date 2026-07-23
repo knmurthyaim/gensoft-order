@@ -1402,6 +1402,48 @@ def get_rep_outstanding(
     )
 
 
+def get_rep_outstanding_parties(
+    db: Session,
+    user: models.User,
+    search: Optional[str] = None,
+    limit: int = 25,
+):
+    if user.role != "rep" or not user.account_id:
+        raise AppError("Sales rep login required")
+    distributor = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not distributor:
+        raise AppError("Distributor account not found")
+    return get_outstanding_parties(
+        db, distributor, search=search, positive_only=True, limit=limit
+    )
+
+
+def get_rep_outstanding_party_bills(
+    db: Session,
+    user: models.User,
+    party_id: str = "",
+    party_name: str = "",
+    limit: int = 500,
+):
+    if user.role != "rep" or not user.account_id:
+        raise AppError("Sales rep login required")
+    distributor = (
+        db.query(models.Account).filter(models.Account.id == user.account_id).first()
+    )
+    if not distributor:
+        raise AppError("Distributor account not found")
+    return get_outstanding_party_bills(
+        db,
+        distributor,
+        party_id=party_id,
+        party_name=party_name,
+        positive_only=True,
+        limit=limit,
+    )
+
+
 def get_rep_catalog(
     db: Session,
     user: models.User,
@@ -2132,14 +2174,13 @@ def _party_place_by_code(db: Session, party_codes) -> dict:
     }
 
 
-def get_outstanding(
+def _outstanding_base_query(
     db: Session,
     account: models.Account,
     search: Optional[str] = None,
     positive_only: bool = True,
-    limit: int = 25,
-) -> tuple[schemas.OutstandingSummary, List[schemas.OutstandingBillRow]]:
-    limit = max(1, min(int(limit or 25), 100))
+):
+    """Shared outstanding bill query for distributor / retailer views."""
     is_supplier = account.account_type in ("distributor", "sub_distributor")
 
     if is_supplier:
@@ -2149,14 +2190,7 @@ def get_outstanding(
     else:
         supplier_ids = _accepted_supplier_ids(db, account)
         if not supplier_ids:
-            empty = schemas.OutstandingSummary(
-                bill_count=0,
-                total_amount=0.0,
-                total_paid=0.0,
-                total_balance=0.0,
-                total_discount=0.0,
-            )
-            return empty, []
+            return None
         q = (
             db.query(models.OutstandingBill)
             .join(models.Party, models.OutstandingBill.party_ref_id == models.Party.id)
@@ -2170,7 +2204,7 @@ def get_outstanding(
         q = q.filter(models.OutstandingBill.balance > 0)
 
     if search:
-        term = f"%{search}%"
+        term = f"%{search.strip()}%"
         q = q.filter(
             or_(
                 models.OutstandingBill.party_name.ilike(term),
@@ -2178,6 +2212,27 @@ def get_outstanding(
                 models.OutstandingBill.invoice_no.ilike(term),
             )
         )
+    return q
+
+
+def get_outstanding(
+    db: Session,
+    account: models.Account,
+    search: Optional[str] = None,
+    positive_only: bool = True,
+    limit: int = 25,
+) -> tuple[schemas.OutstandingSummary, List[schemas.OutstandingBillRow]]:
+    limit = max(1, min(int(limit or 25), 100))
+    q = _outstanding_base_query(db, account, search=search, positive_only=positive_only)
+    if q is None:
+        empty = schemas.OutstandingSummary(
+            bill_count=0,
+            total_amount=0.0,
+            total_paid=0.0,
+            total_balance=0.0,
+            total_discount=0.0,
+        )
+        return empty, []
 
     totals = q.with_entities(
         func.count(models.OutstandingBill.id),
@@ -2220,6 +2275,168 @@ def get_outstanding(
         total_paid=round(float(totals[2] or 0), 2),
         total_balance=round(float(totals[3] or 0), 2),
         total_discount=0.0,  # discount column is % — not summed as money
+    )
+    return summary, rows
+
+
+def get_outstanding_parties(
+    db: Session,
+    account: models.Account,
+    search: Optional[str] = None,
+    positive_only: bool = True,
+    limit: int = 25,
+) -> schemas.OutstandingPartyListResponse:
+    """One row per party: code, name, place, bill count, outstanding sum."""
+    limit = max(1, min(int(limit or 25), 100))
+    q = _outstanding_base_query(db, account, search=search, positive_only=positive_only)
+    empty = schemas.OutstandingSummary(
+        bill_count=0,
+        total_amount=0.0,
+        total_paid=0.0,
+        total_balance=0.0,
+        total_discount=0.0,
+    )
+    if q is None:
+        return schemas.OutstandingPartyListResponse(
+            summary=empty, parties=[], party_count=0
+        )
+
+    totals = q.with_entities(
+        func.count(models.OutstandingBill.id),
+        func.coalesce(func.sum(models.OutstandingBill.amount), 0),
+        func.coalesce(func.sum(models.OutstandingBill.paid), 0),
+        func.coalesce(func.sum(models.OutstandingBill.balance), 0),
+    ).one()
+
+    # Group by party code; bills without a code group by name.
+    party_key = func.coalesce(
+        func.nullif(models.OutstandingBill.party_id, ""),
+        models.OutstandingBill.party_name,
+    )
+    grouped = (
+        q.with_entities(
+            party_key.label("party_key"),
+            func.max(models.OutstandingBill.party_id).label("party_id"),
+            func.max(models.OutstandingBill.party_name).label("party_name"),
+            func.max(models.OutstandingBill.owner_account_id).label("owner_id"),
+            func.count(models.OutstandingBill.id).label("bill_count"),
+            func.coalesce(func.sum(models.OutstandingBill.amount), 0).label("total_amount"),
+            func.coalesce(func.sum(models.OutstandingBill.paid), 0).label("total_paid"),
+            func.coalesce(func.sum(models.OutstandingBill.balance), 0).label(
+                "total_balance"
+            ),
+        )
+        .group_by(party_key)
+        .order_by(func.coalesce(func.sum(models.OutstandingBill.balance), 0).desc())
+        .all()
+    )
+
+    party_count = len(grouped)
+    page = grouped[:limit]
+    place_map = _party_place_by_code(db, [r.party_id for r in page])
+
+    parties = [
+        schemas.OutstandingPartyRow(
+            party_id=(r.party_id or "").strip(),
+            party_name=r.party_name or "",
+            place=place_map.get(
+                (r.owner_id, (r.party_id or "").strip()), ""
+            ),
+            bill_count=int(r.bill_count or 0),
+            total_amount=round(float(r.total_amount or 0), 2),
+            total_paid=round(float(r.total_paid or 0), 2),
+            total_balance=round(float(r.total_balance or 0), 2),
+        )
+        for r in page
+    ]
+
+    summary = schemas.OutstandingSummary(
+        bill_count=int(totals[0] or 0),
+        total_amount=round(float(totals[1] or 0), 2),
+        total_paid=round(float(totals[2] or 0), 2),
+        total_balance=round(float(totals[3] or 0), 2),
+        total_discount=0.0,
+    )
+    return schemas.OutstandingPartyListResponse(
+        summary=summary, parties=parties, party_count=party_count
+    )
+
+
+def get_outstanding_party_bills(
+    db: Session,
+    account: models.Account,
+    party_id: str = "",
+    party_name: str = "",
+    positive_only: bool = True,
+    limit: int = 500,
+) -> tuple[schemas.OutstandingSummary, List[schemas.OutstandingBillRow]]:
+    """Bill-wise outstanding for one party (drill-down)."""
+    limit = max(1, min(int(limit or 500), 1000))
+    pid = (party_id or "").strip()
+    pname = (party_name or "").strip()
+    if not pid and not pname:
+        raise AppError("party_id or party_name is required")
+
+    q = _outstanding_base_query(db, account, positive_only=positive_only)
+    if q is None:
+        empty = schemas.OutstandingSummary(
+            bill_count=0,
+            total_amount=0.0,
+            total_paid=0.0,
+            total_balance=0.0,
+            total_discount=0.0,
+        )
+        return empty, []
+
+    if pid:
+        q = q.filter(models.OutstandingBill.party_id == pid)
+    else:
+        q = q.filter(
+            or_(
+                models.OutstandingBill.party_id == "",
+                models.OutstandingBill.party_id.is_(None),
+            ),
+            models.OutstandingBill.party_name == pname,
+        )
+
+    totals = q.with_entities(
+        func.count(models.OutstandingBill.id),
+        func.coalesce(func.sum(models.OutstandingBill.amount), 0),
+        func.coalesce(func.sum(models.OutstandingBill.paid), 0),
+        func.coalesce(func.sum(models.OutstandingBill.balance), 0),
+    ).one()
+
+    bills = (
+        q.order_by(
+            models.OutstandingBill.invoice_date.desc(),
+            models.OutstandingBill.invoice_no,
+        )
+        .limit(limit)
+        .all()
+    )
+    place_map = _party_place_by_code(db, [b.party_id for b in bills])
+    rows = [
+        schemas.OutstandingBillRow(
+            id=b.id,
+            party_id=b.party_id or "",
+            party_name=b.party_name,
+            place=place_map.get((b.owner_account_id, (b.party_id or "").strip()), ""),
+            invoice_no=b.invoice_no,
+            invoice_date=b.invoice_date,
+            amount=round(b.amount or 0.0, 2),
+            paid=round(b.paid or 0.0, 2),
+            balance=round(b.balance or 0.0, 2),
+            age=_bill_age(b.invoice_date, b.age),
+            discount=round(b.discount or 0.0, 2),
+        )
+        for b in bills
+    ]
+    summary = schemas.OutstandingSummary(
+        bill_count=int(totals[0] or 0),
+        total_amount=round(float(totals[1] or 0), 2),
+        total_paid=round(float(totals[2] or 0), 2),
+        total_balance=round(float(totals[3] or 0), 2),
+        total_discount=0.0,
     )
     return summary, rows
 

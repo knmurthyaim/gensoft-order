@@ -188,6 +188,14 @@ tbody tr:hover {
   background: #f8fafc;
 }
 
+tbody tr.clickable-row {
+  cursor: pointer;
+}
+
+tbody tr.clickable-row:hover {
+  background: #eef5ff;
+}
+
 tbody tr:last-child td {
   border-bottom: none;
 }

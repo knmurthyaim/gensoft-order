@@ -661,9 +661,25 @@ class OutstandingBillRow(BaseModel):
     discount: float
 
 
+class OutstandingPartyRow(BaseModel):
+    party_id: str
+    party_name: str
+    place: str = ""
+    bill_count: int
+    total_amount: float = 0.0
+    total_paid: float = 0.0
+    total_balance: float
+
+
 class OutstandingListResponse(BaseModel):
     summary: OutstandingSummary
     rows: List[OutstandingBillRow]
+
+
+class OutstandingPartyListResponse(BaseModel):
+    summary: OutstandingSummary
+    parties: List[OutstandingPartyRow]
+    party_count: int = 0
 
 
 # ---------- Async sync jobs ----------

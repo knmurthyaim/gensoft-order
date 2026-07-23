@@ -267,6 +267,10 @@ export const repApi = {
     api.get("/rep/stock", { params }).then((r) => r.data),
   outstanding: (params) =>
     api.get("/rep/outstanding", { params }).then((r) => r.data),
+  outstandingParties: (params) =>
+    api.get("/rep/outstanding/parties", { params }).then((r) => r.data),
+  outstandingBills: (params) =>
+    api.get("/rep/outstanding/bills", { params }).then((r) => r.data),
   locationConfig: () =>
     api.get("/rep/location-config").then((r) => r.data),
   trackingToken: () =>
@@ -287,6 +291,10 @@ export const settings = {
 
 export const outstanding = {
   list: (params) => api.get("/outstanding", { params }).then((r) => r.data),
+  parties: (params) =>
+    api.get("/outstanding/parties", { params }).then((r) => r.data),
+  bills: (params) =>
+    api.get("/outstanding/bills", { params }).then((r) => r.data),
   ...makeUploadApi("/outstanding", "gensoft_outstanding_template.xlsx", "outstanding"),
 };
 

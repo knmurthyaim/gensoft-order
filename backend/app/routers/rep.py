@@ -118,6 +118,40 @@ def list_outstanding(
     return schemas.OutstandingListResponse(summary=summary, rows=rows)
 
 
+@router.get("/outstanding/parties", response_model=schemas.OutstandingPartyListResponse)
+def list_outstanding_parties(
+    search: Optional[str] = None,
+    limit: int = Query(25, ge=1, le=100),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_rep(user)
+    try:
+        return crud.get_rep_outstanding_parties(
+            db, user, search=search, limit=limit
+        )
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/outstanding/bills", response_model=schemas.OutstandingListResponse)
+def list_outstanding_party_bills(
+    party_id: str = "",
+    party_name: str = "",
+    limit: int = Query(500, ge=1, le=1000),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_rep(user)
+    try:
+        summary, rows = crud.get_rep_outstanding_party_bills(
+            db, user, party_id=party_id, party_name=party_name, limit=limit
+        )
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return schemas.OutstandingListResponse(summary=summary, rows=rows)
+
+
 @router.get("/catalog")
 def search_catalog(
     q: Optional[str] = Query(None),

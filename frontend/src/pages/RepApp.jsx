@@ -653,21 +653,28 @@ export function RepStock() {
 
 export function RepOutstanding() {
   const [summary, setSummary] = useState(null);
-  const [rows, setRows] = useState([]);
+  const [parties, setParties] = useState([]);
+  const [partyCount, setPartyCount] = useState(0);
   const [q, setQ] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [limit, setLimit] = useState(25);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const load = (search = appliedSearch, rowLimit = limit) => {
+  const [selected, setSelected] = useState(null);
+  const [bills, setBills] = useState([]);
+  const [billSummary, setBillSummary] = useState(null);
+  const [billsLoading, setBillsLoading] = useState(false);
+
+  const loadParties = (search = appliedSearch, rowLimit = limit) => {
     setLoading(true);
     setError("");
     return repApi
-      .outstanding({ search: search || undefined, limit: rowLimit })
+      .outstandingParties({ search: search || undefined, limit: rowLimit })
       .then((data) => {
         setSummary(data.summary);
-        setRows(data.rows || []);
+        setParties(data.parties || []);
+        setPartyCount(data.party_count || 0);
       })
       .catch((e) =>
         setError(e.response?.data?.detail || "Failed to load outstanding")
@@ -675,8 +682,30 @@ export function RepOutstanding() {
       .finally(() => setLoading(false));
   };
 
+  const openParty = (party) => {
+    setSelected(party);
+    setBills([]);
+    setBillSummary(null);
+    setBillsLoading(true);
+    setError("");
+    repApi
+      .outstandingBills({
+        party_id: party.party_id || "",
+        party_name: party.party_name || "",
+        limit: 500,
+      })
+      .then((data) => {
+        setBillSummary(data.summary);
+        setBills(data.rows || []);
+      })
+      .catch((e) =>
+        setError(e.response?.data?.detail || "Failed to load party bills")
+      )
+      .finally(() => setBillsLoading(false));
+  };
+
   useEffect(() => {
-    load("", 25);
+    loadParties("", 25);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -684,96 +713,173 @@ export function RepOutstanding() {
     <div className="rep-page">
       <h1 className="page-title">Outstanding</h1>
       <p className="page-sub">
-        Party outstanding from your distributor billing data.
+        {selected
+          ? "Bill-wise outstanding for this party."
+          : "Party outstanding — tap a party for bill details."}
       </p>
       {error && <div className="error-banner">{error}</div>}
-      {summary && (
-        <div className="orders-summary-bar" style={{ marginBottom: 12 }}>
-          <div className="summary-stats">
-            <span>Bills: {summary.bill_count}</span>
-            <span>Amount: {inr(summary.total_amount)}</span>
-            <span className="summary-total">
-              Balance: {inr(summary.total_balance)}
-            </span>
+
+      {selected ? (
+        <>
+          <button
+            type="button"
+            className="btn secondary sm"
+            onClick={() => {
+              setSelected(null);
+              setBills([]);
+              setBillSummary(null);
+            }}
+          >
+            ← All parties
+          </button>
+          <div style={{ margin: "10px 0 8px" }}>
+            <strong>{selected.party_name}</strong>
+            <div className="muted" style={{ fontSize: 13 }}>
+              {selected.party_id || "—"}
+              {selected.place ? ` · ${selected.place}` : ""}
+            </div>
           </div>
-        </div>
+          {billSummary && (
+            <div className="orders-summary-bar" style={{ marginBottom: 12 }}>
+              <div className="summary-stats">
+                <span>Bills: {billSummary.bill_count}</span>
+                <span className="summary-total">
+                  Balance: {inr(billSummary.total_balance)}
+                </span>
+              </div>
+            </div>
+          )}
+          <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
+            {billsLoading
+              ? "Loading…"
+              : `Showing ${bills.length} bill${bills.length === 1 ? "" : "s"}.`}
+          </p>
+          <div className="panel">
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Date</th>
+                    <th>Balance</th>
+                    <th>Age</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bills.map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.invoice_no}</td>
+                      <td>{fmtDate(r.invoice_date)}</td>
+                      <td className="order-amount">{inr(r.balance)}</td>
+                      <td>{r.age}</td>
+                    </tr>
+                  ))}
+                  {!billsLoading && bills.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="empty">
+                        No outstanding bills.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {summary && (
+            <div className="orders-summary-bar" style={{ marginBottom: 12 }}>
+              <div className="summary-stats">
+                <span>Parties: {partyCount}</span>
+                <span>Bills: {summary.bill_count}</span>
+                <span className="summary-total">
+                  Balance: {inr(summary.total_balance)}
+                </span>
+              </div>
+            </div>
+          )}
+          <form
+            className="toolbar"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const search = q.trim();
+              setAppliedSearch(search);
+              loadParties(search);
+            }}
+          >
+            <input
+              className="search-input"
+              placeholder="Search party / invoice..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <button className="btn secondary" type="submit" disabled={loading}>
+              Search
+            </button>
+            <select
+              className="rows-select"
+              aria-label="Rows to show"
+              value={limit}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setLimit(next);
+                loadParties(appliedSearch, next);
+              }}
+            >
+              {[25, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n} rows
+                </option>
+              ))}
+            </select>
+          </form>
+          <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
+            {loading
+              ? "Loading…"
+              : `Showing ${parties.length} of ${partyCount} parties.`}
+          </p>
+          <div className="panel">
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Party</th>
+                    <th>Place</th>
+                    <th>Bills</th>
+                    <th>Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parties.map((p) => (
+                    <tr
+                      key={`${p.party_id}|${p.party_name}`}
+                      className="clickable-row"
+                      onClick={() => openParty(p)}
+                    >
+                      <td>{p.party_id || "—"}</td>
+                      <td>
+                        <strong>{p.party_name}</strong>
+                      </td>
+                      <td>{p.place || "—"}</td>
+                      <td>{p.bill_count}</td>
+                      <td className="order-amount">{inr(p.total_balance)}</td>
+                    </tr>
+                  ))}
+                  {parties.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="empty">
+                        No outstanding parties.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
-      <form
-        className="toolbar"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const search = q.trim();
-          setAppliedSearch(search);
-          load(search);
-        }}
-      >
-        <input
-          className="search-input"
-          placeholder="Search party / invoice..."
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <button className="btn secondary" type="submit" disabled={loading}>
-          Search
-        </button>
-        <select
-          className="rows-select"
-          aria-label="Rows to show"
-          value={limit}
-          onChange={(e) => {
-            const next = Number(e.target.value);
-            setLimit(next);
-            load(appliedSearch, next);
-          }}
-        >
-          {[25, 50, 100].map((n) => (
-            <option key={n} value={n}>{n} rows</option>
-          ))}
-        </select>
-      </form>
-      <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
-        {loading
-          ? "Loading…"
-          : `Showing ${rows.length} of ${summary?.bill_count ?? 0} bills.`}
-      </p>
-      <div className="panel">
-        <div className="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Party</th>
-              <th>Place</th>
-              <th>Invoice</th>
-              <th>Date</th>
-              <th>Balance</th>
-              <th>Age</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  <strong>{r.party_name}</strong>
-                  <div className="muted">{r.party_id || ""}</div>
-                </td>
-                <td>{r.place || "—"}</td>
-                <td>{r.invoice_no}</td>
-                <td>{fmtDate(r.invoice_date)}</td>
-                <td className="order-amount">{inr(r.balance)}</td>
-                <td>{r.age}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="empty">
-                  No outstanding bills.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
-      </div>
     </div>
   );
 }
