@@ -24,6 +24,7 @@ export default function AdminUsers() {
   const { logout } = useAuth();
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("pending");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -40,24 +41,81 @@ export default function AdminUsers() {
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [managingData, setManagingData] = useState(null);
+  const [actingId, setActingId] = useState(null);
   const fileInputRef = useRef(null);
   const searchTimer = useRef(null);
 
-  const load = (q = search) =>
+  const load = (q = search, status = statusFilter) =>
     adminApi
-      .listAccounts((q || "").trim() || undefined)
+      .listAccounts(
+        (q || "").trim() || undefined,
+        status === "all" ? undefined : status
+      )
       .then(setRows)
       .catch(() => setError("Failed to load accounts."));
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [statusFilter]);
 
   const onSearchChange = (value) => {
     setSearch(value);
     if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => load(value), 280);
+    searchTimer.current = setTimeout(() => load(value, statusFilter), 280);
+  };
+
+  const approve = async (row) => {
+    setActingId(row.account.id);
+    setError("");
+    try {
+      await adminApi.approveAccount(row.account.id);
+      setNotice(`${row.account.name} approved — they can sign in now.`);
+      setViewing(null);
+      load();
+      setTimeout(() => setNotice(""), 3000);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Approve failed.");
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const reject = async (row) => {
+    const reason = window.prompt(
+      "Optional rejection reason (shown if they try to sign in):",
+      ""
+    );
+    if (reason === null) return;
+    setActingId(row.account.id);
+    setError("");
+    try {
+      await adminApi.rejectAccount(row.account.id, reason || "");
+      setNotice(`${row.account.name} rejected.`);
+      setViewing(null);
+      load();
+      setTimeout(() => setNotice(""), 3000);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Reject failed.");
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const statusLabel = (r) => {
+    const s = r.account.approval_status || "approved";
+    if (s === "pending") return "pending approval";
+    if (s === "rejected") return "rejected";
+    if (r.user_is_active && r.account.is_active) return "active";
+    return "disabled";
+  };
+
+  const statusClass = (r) => {
+    const s = r.account.approval_status || "approved";
+    if (s === "pending") return "pending";
+    if (s === "rejected") return "rejected";
+    if (r.user_is_active && r.account.is_active) return "accepted";
+    return "rejected";
   };
 
   const openCreate = () => {
@@ -215,8 +273,8 @@ export default function AdminUsers() {
           <div>
             <h1 className="page-title">User Registration &amp; Management</h1>
             <p className="page-sub">
-              Search by GenSoft code or name — view, edit, delete accounts, or
-              manage products / stock / customers / outstanding
+              Review pending signups (with attachments), approve or reject, and
+              manage all accounts
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -252,6 +310,30 @@ export default function AdminUsers() {
         {notice && <div className="notice-banner">{notice}</div>}
 
         <div className="panel" style={{ marginBottom: 12, padding: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              marginBottom: 10,
+            }}
+          >
+            {[
+              { id: "pending", label: "Pending approval" },
+              { id: "approved", label: "Approved" },
+              { id: "rejected", label: "Rejected" },
+              { id: "all", label: "All" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`btn sm ${statusFilter === t.id ? "" : "secondary"}`}
+                onClick={() => setStatusFilter(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <div className="field" style={{ margin: 0 }}>
             <label>Search customers</label>
             <input
@@ -276,7 +358,7 @@ export default function AdminUsers() {
                 <th>Type</th>
                 <th>Username</th>
                 <th>Mobile</th>
-                <th>DL No</th>
+                <th>Docs</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -292,18 +374,10 @@ export default function AdminUsers() {
                   <td>{r.account.account_type}</td>
                   <td>{r.username}</td>
                   <td>{r.account.mobile || "—"}</td>
-                  <td>{r.account.dl_no || "—"}</td>
+                  <td>{r.attachment_count || 0}</td>
                   <td>
-                    <span
-                      className={`status-pill ${
-                        r.user_is_active && r.account.is_active
-                          ? "accepted"
-                          : "rejected"
-                      }`}
-                    >
-                      {r.user_is_active && r.account.is_active
-                        ? "active"
-                        : "disabled"}
+                    <span className={`status-pill ${statusClass(r)}`}>
+                      {statusLabel(r)}
                     </span>
                   </td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
@@ -313,6 +387,25 @@ export default function AdminUsers() {
                     >
                       View
                     </button>{" "}
+                    {(r.account.approval_status || "") === "pending" && (
+                      <>
+                        <button
+                          className="btn sm"
+                          disabled={actingId === r.account.id}
+                          onClick={() => approve(r)}
+                        >
+                          Approve
+                        </button>{" "}
+                        <button
+                          className="btn secondary sm"
+                          disabled={actingId === r.account.id}
+                          onClick={() => reject(r)}
+                          style={{ color: "#b91c1c" }}
+                        >
+                          Reject
+                        </button>{" "}
+                      </>
+                    )}
                     <button
                       className="btn secondary sm"
                       onClick={() => setManagingData(r)}
@@ -339,9 +432,11 @@ export default function AdminUsers() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={8} className="empty">
-                    {search.trim()
-                      ? "No customers match this search."
-                      : "No users registered yet."}
+                    {statusFilter === "pending"
+                      ? "No pending registrations."
+                      : search.trim()
+                        ? "No customers match this search."
+                        : "No users registered yet."}
                   </td>
                 </tr>
               )}
@@ -385,6 +480,27 @@ export default function AdminUsers() {
             >
               Close
             </button>
+            {(viewing.account.approval_status || "") === "pending" && (
+              <>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ color: "#b91c1c" }}
+                  disabled={actingId === viewing.account.id}
+                  onClick={() => reject(viewing)}
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={actingId === viewing.account.id}
+                  onClick={() => approve(viewing)}
+                >
+                  Approve
+                </button>
+              </>
+            )}
             <button
               type="button"
               className="btn secondary"
@@ -527,41 +643,66 @@ function AccountDetail({ row }) {
     ["Area", a.area || "—"],
     ["City", a.city || "—"],
     ["Address", a.address || "—"],
-    [
-      "Account Status",
-      a.is_active ? "Active" : "Disabled",
-    ],
-    [
-      "Login Status",
-      row.user_is_active ? "Active" : "Disabled",
-    ],
+    ["Approval", a.approval_status || "approved"],
+    ["Signup notes", a.signup_notes || "—"],
+    ["Rejection reason", a.rejection_reason || "—"],
+    ["Account Status", a.is_active ? "Active" : "Disabled"],
+    ["Login Status", row.user_is_active ? "Active" : "Disabled"],
   ];
+  const attachments = row.attachments || [];
   return (
-    <div className="form-grid">
-      {fields.map(([label, value]) => (
-        <div
-          key={label}
-          className="field"
-          style={
-            label === "Address" || label === "Business Name"
-              ? { gridColumn: "1 / -1" }
-              : undefined
-          }
-        >
-          <label>{label}</label>
+    <div>
+      <div className="form-grid">
+        {fields.map(([label, value]) => (
           <div
-            style={{
-              padding: "8px 10px",
-              background: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              borderRadius: 6,
-              minHeight: 38,
-            }}
+            key={label}
+            className="field"
+            style={
+              ["Address", "Business Name", "Signup notes", "Rejection reason"].includes(
+                label
+              )
+                ? { gridColumn: "1 / -1" }
+                : undefined
+            }
           >
-            {value}
+            <label>{label}</label>
+            <div
+              style={{
+                padding: "8px 10px",
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                minHeight: 38,
+              }}
+            >
+              {value}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
+      <h3 style={{ fontSize: 15, marginTop: 16 }}>Attachments</h3>
+      {attachments.length === 0 ? (
+        <p className="muted">No documents uploaded.</p>
+      ) : (
+        <ul className="signup-file-list">
+          {attachments.map((att) => (
+            <li key={att.id}>
+              <span className="signup-file-name">
+                [{att.doc_type}] {att.original_filename}
+              </span>
+              <button
+                type="button"
+                className="btn secondary sm"
+                onClick={() =>
+                  adminApi.downloadAttachment(att.id, att.original_filename)
+                }
+              >
+                Download
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

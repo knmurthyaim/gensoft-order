@@ -39,6 +39,12 @@ class Account(Base):
     gst_no = Column(String, default="")
     email = Column(String, default="")
     is_active = Column(Boolean, default=True)
+    # Self-signup approval: pending | approved | rejected
+    approval_status = Column(String, default="approved", index=True)
+    rejection_reason = Column(String, default="")
+    approved_at = Column(DateTime, nullable=True)
+    approved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    signup_notes = Column(String, default="")
     # Distributor order settings (used when account is supplier)
     allow_order_no_stock = Column(Boolean, default=False)
     allow_order_over_stock = Column(Boolean, default=False)
@@ -54,11 +60,37 @@ class Account(Base):
     no_order_full_day = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow)
 
-    users = relationship("User", back_populates="account", cascade="all, delete-orphan")
+    users = relationship("User", back_populates="account", cascade="all, delete-orphan",
+                         foreign_keys="User.account_id")
     parties = relationship("Party", back_populates="owner", cascade="all, delete-orphan",
                            foreign_keys="Party.owner_account_id")
     sales_reps = relationship("SalesRep", back_populates="owner", cascade="all, delete-orphan")
     products = relationship("Product", back_populates="owner", cascade="all, delete-orphan")
+    attachments = relationship(
+        "AccountAttachment",
+        back_populates="account",
+        cascade="all, delete-orphan",
+        foreign_keys="AccountAttachment.account_id",
+    )
+
+
+class AccountAttachment(Base):
+    """Documents uploaded during public signup (DL, GST, etc.)."""
+
+    __tablename__ = "account_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    doc_type = Column(String, default="other")  # dl, gst, address_proof, other
+    original_filename = Column(String, default="")
+    stored_filename = Column(String, nullable=False)
+    content_type = Column(String, default="application/octet-stream")
+    size_bytes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow)
+
+    account = relationship(
+        "Account", back_populates="attachments", foreign_keys=[account_id]
+    )
 
 
 class User(Base):
@@ -74,7 +106,9 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
 
-    account = relationship("Account", back_populates="users")
+    account = relationship(
+        "Account", back_populates="users", foreign_keys=[account_id]
+    )
     sales_rep = relationship("SalesRep", foreign_keys=[sales_rep_id])
 
 

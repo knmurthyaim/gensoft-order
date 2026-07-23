@@ -62,6 +62,12 @@ def get_current_account(
     )
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+    status = getattr(account, "approval_status", "approved") or "approved"
+    if status != "approved" or not account.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="Account is not approved or has been disabled",
+        )
     return account
 
 

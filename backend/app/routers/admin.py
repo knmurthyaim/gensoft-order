@@ -47,10 +47,15 @@ SAMPLE_ROW = [
 @router.get("/accounts", response_model=List[schemas.AdminAccountRow])
 def list_accounts(
     search: Optional[str] = Query(None, description="Filter by code, name, username, mobile…"),
+    approval_status: Optional[str] = Query(
+        None, description="pending | approved | rejected"
+    ),
     db: Session = Depends(get_db),
     _admin=Depends(require_platform_admin),
 ):
-    return crud.list_admin_accounts(db, search=search)
+    return crud.list_admin_accounts(
+        db, search=search, approval_status=approval_status
+    )
 
 
 @router.get("/accounts/upload/template")
@@ -128,12 +133,68 @@ def create_account(
     if db.query(models.User).filter(models.User.username == data.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
     account, user = crud.register_account(db, data)
-    return schemas.AdminAccountRow(
-        account=account,
-        user_id=user.id,
-        username=user.username,
-        user_name=user.name,
-        user_is_active=user.is_active,
+    return crud.admin_get_account(db, account.id)
+
+
+@router.post("/accounts/{account_id}/approve", response_model=schemas.AdminAccountRow)
+def approve_account(
+    account_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_platform_admin),
+):
+    row = crud.approve_signup(db, account_id, admin)
+    if not row:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return row
+
+
+@router.post("/accounts/{account_id}/reject", response_model=schemas.AdminAccountRow)
+def reject_account(
+    account_id: int,
+    data: schemas.RejectSignupRequest,
+    db: Session = Depends(get_db),
+    admin=Depends(require_platform_admin),
+):
+    row = crud.reject_signup(db, account_id, admin, reason=data.reason or "")
+    if not row:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return row
+
+
+@router.get(
+    "/accounts/{account_id}/attachments",
+    response_model=List[schemas.AccountAttachmentOut],
+)
+def list_attachments(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    if not db.query(models.Account).filter(models.Account.id == account_id).first():
+        raise HTTPException(status_code=404, detail="Account not found")
+    return crud.list_account_attachments(db, account_id)
+
+
+@router.get("/attachments/{attachment_id}/download")
+def download_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    import os
+
+    from fastapi.responses import FileResponse
+
+    att = crud.get_account_attachment(db, attachment_id)
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    path = crud.attachment_disk_path(att)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Attachment file missing on server")
+    return FileResponse(
+        path,
+        media_type=att.content_type or "application/octet-stream",
+        filename=att.original_filename or att.stored_filename,
     )
 
 

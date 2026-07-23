@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./AuthContext.jsx";
 import TopNav from "./components/TopNav.jsx";
 import Login from "./pages/Login.jsx";
+import Signup from "./pages/Signup.jsx";
 import AdminUsers from "./pages/AdminUsers.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Orders from "./pages/Orders.jsx";
@@ -33,7 +34,12 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login />;
+    return (
+      <Routes>
+        <Route path="/signup" element={<Signup />} />
+        <Route path="*" element={<Login />} />
+      </Routes>
+    );
   }
 
   if (user.role === "platform_admin") {

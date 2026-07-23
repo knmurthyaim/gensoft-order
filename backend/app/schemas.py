@@ -69,7 +69,34 @@ class Account(AccountBase):
     id: int
     gensoft_code: str
     is_active: bool
+    approval_status: str = "approved"
+    rejection_reason: str = ""
+    approved_at: Optional[datetime] = None
+    signup_notes: str = ""
     created_at: datetime
+
+
+class AccountAttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+    doc_type: str
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+
+
+class SignupResponse(BaseModel):
+    status: str = "pending"
+    message: str
+    gensoft_code: str
+    account_id: int
+
+
+class RejectSignupRequest(BaseModel):
+    reason: str = ""
 
 
 class DirectoryAccount(BaseModel):
@@ -97,6 +124,7 @@ class User(BaseModel):
     role: str
     account_id: Optional[int]
     sales_rep_id: Optional[int] = None
+    is_active: bool = True
 
 
 class Me(BaseModel):
@@ -475,6 +503,8 @@ class AdminAccountRow(BaseModel):
     username: str
     user_name: str
     user_is_active: bool
+    attachment_count: int = 0
+    attachments: List[AccountAttachmentOut] = []
 
 
 class AdminAccountUpdate(BaseModel):
@@ -489,6 +519,9 @@ class AdminAccountUpdate(BaseModel):
     gst_no: Optional[str] = None
     email: Optional[str] = None
     is_active: Optional[bool] = None
+    approval_status: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    signup_notes: Optional[str] = None
 
 
 class AdminUserUpdate(BaseModel):

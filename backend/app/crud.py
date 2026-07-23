@@ -1,3 +1,4 @@
+import os
 import random
 import string
 from datetime import date, datetime, timedelta, timezone
@@ -51,6 +52,7 @@ def _gen_code(db: Session) -> str:
 
 
 def register_account(db: Session, data: schemas.RegisterRequest):
+    """Admin-created accounts are active and approved immediately."""
     account = models.Account(
         gensoft_code=_gen_code(db),
         account_type=data.account_type,
@@ -63,6 +65,9 @@ def register_account(db: Session, data: schemas.RegisterRequest):
         dl_no=data.dl_no,
         gst_no=data.gst_no,
         email=data.email,
+        is_active=True,
+        approval_status="approved",
+        approved_at=datetime.now(timezone.utc),
     )
     db.add(account)
     db.flush()
@@ -72,12 +77,216 @@ def register_account(db: Session, data: schemas.RegisterRequest):
         name=data.owner_name or data.name,
         role="owner",
         account_id=account.id,
+        is_active=True,
     )
     db.add(user)
     db.commit()
     db.refresh(account)
     db.refresh(user)
     return account, user
+
+
+ALLOWED_SIGNUP_TYPES = {"distributor", "retailer", "sub_distributor", "stockist"}
+ALLOWED_DOC_TYPES = {"dl", "gst", "address_proof", "other"}
+MAX_SIGNUP_FILES = 8
+MAX_SIGNUP_FILE_BYTES = 8 * 1024 * 1024  # 8 MB each
+
+
+def _registration_upload_dir() -> str:
+    path = os.getenv("REGISTRATION_UPLOAD_DIR", "registration_uploads")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def public_signup(
+    db: Session,
+    data: schemas.RegisterRequest,
+    file_blobs: Optional[List[dict]] = None,
+    notes: str = "",
+):
+    """Self-service registration — pending until super admin approves.
+
+    file_blobs: [{filename, content_type, content: bytes, doc_type}]
+    """
+    account_type = (data.account_type or "retailer").strip().lower()
+    if account_type not in ALLOWED_SIGNUP_TYPES:
+        raise AppError(
+            "account_type must be distributor, retailer, sub_distributor, or stockist"
+        )
+    username = (data.username or "").strip()
+    if not username:
+        raise AppError("Username is required")
+    if db.query(models.User).filter(models.User.username == username).first():
+        raise AppError("Username already taken")
+    if not (data.name or "").strip():
+        raise AppError("Business name is required")
+    if not (data.mobile or "").strip():
+        raise AppError("Mobile number is required")
+    if len((data.password or "").strip()) < 4:
+        raise AppError("Password must be at least 4 characters")
+
+    account = models.Account(
+        gensoft_code=_gen_code(db),
+        account_type=account_type,
+        name=data.name.strip(),
+        owner_name=(data.owner_name or "").strip(),
+        address=(data.address or "").strip(),
+        area=(data.area or "").strip(),
+        city=(data.city or "Hyderabad").strip() or "Hyderabad",
+        mobile=(data.mobile or "").strip(),
+        dl_no=(data.dl_no or "").strip(),
+        gst_no=(data.gst_no or "").strip(),
+        email=(data.email or "").strip(),
+        is_active=False,
+        approval_status="pending",
+        signup_notes=(notes or "").strip(),
+    )
+    db.add(account)
+    db.flush()
+
+    user = models.User(
+        username=username,
+        password_hash=hash_password(data.password),
+        name=(data.owner_name or data.name).strip(),
+        role="owner",
+        account_id=account.id,
+        is_active=False,
+    )
+    db.add(user)
+    db.flush()
+
+    saved_files = []
+    try:
+        blobs = list(file_blobs or [])
+        if len(blobs) > MAX_SIGNUP_FILES:
+            raise AppError(f"Maximum {MAX_SIGNUP_FILES} attachments allowed")
+        upload_root = _registration_upload_dir()
+        for idx, blob in enumerate(blobs):
+            content = blob.get("content") or b""
+            raw_name = (blob.get("filename") or f"file_{idx}").strip()
+            if not content:
+                continue
+            if len(content) > MAX_SIGNUP_FILE_BYTES:
+                raise AppError(
+                    f"File '{raw_name}' is too large "
+                    f"(max {MAX_SIGNUP_FILE_BYTES // (1024 * 1024)} MB)"
+                )
+            doc_type = (blob.get("doc_type") or "other").strip().lower()
+            if doc_type not in ALLOWED_DOC_TYPES:
+                doc_type = "other"
+            safe_base = "".join(
+                ch if ch.isalnum() or ch in "._-" else "_"
+                for ch in os.path.basename(raw_name)
+            )[:120] or "document"
+            stored = (
+                f"{account.id}_{idx}_{int(datetime.now(timezone.utc).timestamp())}"
+                f"_{safe_base}"
+            )
+            dest = os.path.join(upload_root, stored)
+            with open(dest, "wb") as out:
+                out.write(content)
+            saved_files.append(dest)
+            db.add(
+                models.AccountAttachment(
+                    account_id=account.id,
+                    doc_type=doc_type,
+                    original_filename=raw_name[:255],
+                    stored_filename=stored,
+                    content_type=blob.get("content_type")
+                    or "application/octet-stream",
+                    size_bytes=len(content),
+                )
+            )
+    except Exception:
+        for path in saved_files:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        db.rollback()
+        raise
+
+    db.commit()
+    db.refresh(account)
+    return account, user
+
+
+def approve_signup(db: Session, account_id: int, admin: models.User):
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        return None
+    acc.approval_status = "approved"
+    acc.is_active = True
+    acc.rejection_reason = ""
+    acc.approved_at = datetime.now(timezone.utc)
+    acc.approved_by_user_id = admin.id
+    owner = (
+        db.query(models.User)
+        .filter(models.User.account_id == acc.id, models.User.role == "owner")
+        .first()
+    )
+    if owner:
+        owner.is_active = True
+    db.commit()
+    return admin_get_account(db, account_id)
+
+
+def reject_signup(
+    db: Session, account_id: int, admin: models.User, reason: str = ""
+):
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        return None
+    acc.approval_status = "rejected"
+    acc.is_active = False
+    acc.rejection_reason = (reason or "").strip()[:500]
+    acc.approved_at = datetime.now(timezone.utc)
+    acc.approved_by_user_id = admin.id
+    owner = (
+        db.query(models.User)
+        .filter(models.User.account_id == acc.id, models.User.role == "owner")
+        .first()
+    )
+    if owner:
+        owner.is_active = False
+    db.commit()
+    return admin_get_account(db, account_id)
+
+
+def list_account_attachments(db: Session, account_id: int):
+    return (
+        db.query(models.AccountAttachment)
+        .filter(models.AccountAttachment.account_id == account_id)
+        .order_by(models.AccountAttachment.created_at.asc())
+        .all()
+    )
+
+
+def get_account_attachment(db: Session, attachment_id: int):
+    return (
+        db.query(models.AccountAttachment)
+        .filter(models.AccountAttachment.id == attachment_id)
+        .first()
+    )
+
+
+def attachment_disk_path(att: models.AccountAttachment) -> str:
+    return os.path.join(_registration_upload_dir(), att.stored_filename)
+
+
+def _admin_row_for(db: Session, acc: models.Account, owner: models.User):
+    attachments = list_account_attachments(db, acc.id)
+    return schemas.AdminAccountRow(
+        account=acc,
+        user_id=owner.id,
+        username=owner.username,
+        user_name=owner.name,
+        user_is_active=owner.is_active,
+        attachment_count=len(attachments),
+        attachments=[
+            schemas.AccountAttachmentOut.model_validate(a) for a in attachments
+        ],
+    )
 
 
 def update_account(db: Session, account: models.Account, data: schemas.AccountUpdate):
@@ -3464,9 +3673,14 @@ def upload_outstanding_from_excel_rows(
 
 # ---------- Super Admin ----------
 def list_admin_accounts(
-    db: Session, search: Optional[str] = None
+    db: Session,
+    search: Optional[str] = None,
+    approval_status: Optional[str] = None,
 ) -> List[schemas.AdminAccountRow]:
     q = db.query(models.Account)
+    status = (approval_status or "").strip().lower()
+    if status in ("pending", "approved", "rejected"):
+        q = q.filter(models.Account.approval_status == status)
     term = (search or "").strip()
     if term:
         like = f"%{term}%"
@@ -3496,7 +3710,12 @@ def list_admin_accounts(
         if owner_ids:
             filters.append(models.Account.id.in_(owner_ids))
         q = q.filter(or_(*filters))
-    accounts = q.order_by(models.Account.name).all()
+    # Pending signups first, then by name
+    accounts = q.order_by(
+        models.Account.approval_status.asc(),
+        models.Account.created_at.desc(),
+        models.Account.name.asc(),
+    ).all()
     rows = []
     for acc in accounts:
         owner = (
@@ -3506,15 +3725,7 @@ def list_admin_accounts(
         )
         if not owner:
             continue
-        rows.append(
-            schemas.AdminAccountRow(
-                account=acc,
-                user_id=owner.id,
-                username=owner.username,
-                user_name=owner.name,
-                user_is_active=owner.is_active,
-            )
-        )
+        rows.append(_admin_row_for(db, acc, owner))
     return rows
 
 
@@ -3529,13 +3740,7 @@ def admin_get_account(db: Session, account_id: int):
     )
     if not owner:
         return None
-    return schemas.AdminAccountRow(
-        account=acc,
-        user_id=owner.id,
-        username=owner.username,
-        user_name=owner.name,
-        user_is_active=owner.is_active,
-    )
+    return _admin_row_for(db, acc, owner)
 
 
 def admin_update_account(db: Session, account_id: int, data: schemas.AdminAccountUpdate):

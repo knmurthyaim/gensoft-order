@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../AuthContext.jsx";
 
 const DEMO = [
@@ -109,7 +110,8 @@ export default function Login() {
         </form>
 
         <p className="login-note muted">
-          New user registration is managed by the Super Admin only.
+          New business? <Link to="/signup">Sign up</Link> — Super Admin will
+          approve your registration.
         </p>
 
         {!isNative && (

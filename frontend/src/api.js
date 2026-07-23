@@ -73,6 +73,8 @@ export const auth = {
     api
       .post("/auth/change-password", { current_password, new_password })
       .then((r) => r.data),
+  register: (formData) =>
+    api.post("/auth/register", formData).then((r) => r.data),
 };
 
 function downloadBlob(r, filename) {
@@ -148,9 +150,14 @@ function makeUploadApi(basePath, templateFilename, syncType = null) {
   };
 }
 export const admin = {
-  listAccounts: (search) =>
+  listAccounts: (search, approval_status) =>
     api
-      .get("/admin/accounts", { params: search ? { search } : {} })
+      .get("/admin/accounts", {
+        params: {
+          ...(search ? { search } : {}),
+          ...(approval_status ? { approval_status } : {}),
+        },
+      })
       .then((r) => r.data),
   getAccount: (id) => api.get(`/admin/accounts/${id}`).then((r) => r.data),
   createAccount: (data) =>
@@ -159,6 +166,20 @@ export const admin = {
     api.put(`/admin/accounts/${id}`, data).then((r) => r.data),
   deleteAccount: (id) =>
     api.delete(`/admin/accounts/${id}`).then((r) => r.data),
+  approveAccount: (id) =>
+    api.post(`/admin/accounts/${id}/approve`).then((r) => r.data),
+  rejectAccount: (id, reason = "") =>
+    api
+      .post(`/admin/accounts/${id}/reject`, { reason })
+      .then((r) => r.data),
+  listAttachments: (id) =>
+    api.get(`/admin/accounts/${id}/attachments`).then((r) => r.data),
+  downloadAttachment: async (attachmentId, filename) => {
+    const r = await api.get(`/admin/attachments/${attachmentId}/download`, {
+      responseType: "blob",
+    });
+    downloadBlob(r, filename || "attachment");
+  },
   updateUser: (id, data) =>
     api.put(`/admin/users/${id}`, data).then((r) => r.data),
   dataSummary: (id) =>
