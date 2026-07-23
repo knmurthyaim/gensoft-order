@@ -26,17 +26,6 @@ export default function Products() {
             </>
           ),
         },
-        { header: "Sch.", sort: "schedule", render: (r) => r.schedule || "—" },
-        { header: "MRP", sort: "mrp", render: (r) => inr(r.mrp) },
-        { header: "PTR", sort: "ptr", render: (r) => inr(r.ptr_rate) },
-        { header: "PTS", sort: "pts", render: (r) => inr(r.pts_rate) },
-        { header: "Special", sort: "special", render: (r) => inr(r.special_rate) },
-        { header: "GST%", sort: "gst", render: (r) => `${r.gst_pct}%` },
-        {
-          header: "Hold",
-          sort: "hold",
-          render: (r) => (r.is_on_hold ? "Yes" : "—"),
-        },
         {
           header: "Stock",
           sort: "stock",
@@ -45,6 +34,17 @@ export default function Products() {
               {r.total_stock}
             </span>
           ),
+        },
+        { header: "MRP", sort: "mrp", render: (r) => inr(r.mrp) },
+        { header: "PTR", sort: "ptr", render: (r) => inr(r.ptr_rate) },
+        { header: "PTS", sort: "pts", render: (r) => inr(r.pts_rate) },
+        { header: "Special", sort: "special", render: (r) => inr(r.special_rate) },
+        { header: "GST%", sort: "gst", render: (r) => `${r.gst_pct}%` },
+        { header: "Sch.", sort: "schedule", render: (r) => r.schedule || "—" },
+        {
+          header: "Hold",
+          sort: "hold",
+          render: (r) => (r.is_on_hold ? "Yes" : "—"),
         },
       ]}
       fields={[
