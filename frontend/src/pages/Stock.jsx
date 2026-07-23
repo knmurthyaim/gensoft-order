@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Modal from "../components/Modal.jsx";
+import { SortTh, nextSort } from "../components/SortTh.jsx";
 import { batches, products as prodApi } from "../api";
 import {
   fmtExpiry,
@@ -30,16 +31,35 @@ export default function Stock() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const [loading, setLoading] = useState(false);
   const [productSearch, setProductSearch] = useState("");
 
-  const load = (q = appliedSearch, rowLimit = limit) => {
+  const load = (
+    q = appliedSearch,
+    rowLimit = limit,
+    by = sortBy,
+    dir = sortDir
+  ) => {
     setLoading(true);
     return batches
-      .list({ search: q || undefined, limit: rowLimit })
+      .list({
+        search: q || undefined,
+        limit: rowLimit,
+        sort_by: by,
+        sort_dir: dir,
+      })
       .then(setRows)
       .catch(() => setError("Failed to load stock."))
       .finally(() => setLoading(false));
+  };
+
+  const onSort = (col) => {
+    const next = nextSort(sortBy, sortDir, col);
+    setSortBy(next.sortBy);
+    setSortDir(next.sortDir);
+    load(appliedSearch, limit, next.sortBy, next.sortDir);
   };
 
   const loadProducts = (q = "") =>
@@ -132,8 +152,8 @@ export default function Stock() {
         <div>
           <h1 className="page-title">Stock / Batches</h1>
           <p className="page-sub">
-            Batch-wise inventory. Toggle "Show" to share a batch with connected
-            customers. Expiry is month &amp; year only.
+            Batch-wise inventory. Toggle &quot;Show&quot; to share a batch with connected
+            customers. Expiry is month &amp; year only. Click headers to sort.
           </p>
         </div>
         <button className="btn" onClick={openCreate}>
@@ -184,13 +204,13 @@ export default function Stock() {
         <table>
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Batch</th>
-              <th>Expiry</th>
-              <th>Qty</th>
-              <th>Scheme</th>
-              <th>PTR</th>
-              <th>PTS</th>
+              <SortTh label="Product" col="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="Batch" col="batch" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="Expiry" col="expiry" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="Qty" col="qty" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="Scheme" col="scheme" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="PTR" col="ptr" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="PTS" col="pts" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <th>Show</th>
               <th></th>
             </tr>

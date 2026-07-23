@@ -894,6 +894,8 @@ def get_batches(
     product_id: Optional[int] = None,
     search: Optional[str] = None,
     limit: int = 25,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ):
     from sqlalchemy.orm import joinedload
 
@@ -915,7 +917,24 @@ def get_batches(
                 models.StockBatch.batch_no.ilike(term),
             )
         )
-    return q.order_by(models.StockBatch.id.desc()).limit(limit).all()
+    desc = (sort_dir or "asc").lower() == "desc"
+    key = (sort_by or "name").lower()
+    col_map = {
+        "name": models.Product.name,
+        "batch": models.StockBatch.batch_no,
+        "expiry": models.StockBatch.expiry_date,
+        "qty": models.StockBatch.available_qty,
+        "scheme": models.StockBatch.scheme,
+        "ptr": models.StockBatch.ptr_rate,
+        "pts": models.StockBatch.pts_rate,
+        "mrp": models.StockBatch.mrp,
+    }
+    col = col_map.get(key, models.Product.name)
+    order = col.desc() if desc else col.asc()
+    # Stable secondary: product name then batch
+    if key != "name":
+        return q.order_by(order, models.Product.name.asc()).limit(limit).all()
+    return q.order_by(order, models.StockBatch.batch_no.asc()).limit(limit).all()
 
 
 def get_batch(db: Session, account: models.Account, batch_id: int):
@@ -1302,7 +1321,8 @@ def tag_rep_customer_location(
 
 
 def get_rep_stock(
-    db: Session, user: models.User, search: Optional[str] = None, limit: int = 100
+    db: Session, user: models.User, search: Optional[str] = None, limit: int = 100,
+    sort_by: str = "name", sort_dir: str = "asc",
 ):
     """Distributor stock list for sales rep (this distributor only)."""
     if user.role != "rep" or not user.account_id:
@@ -1355,7 +1375,19 @@ def get_rep_stock(
             )
         )
 
-    rows_db = q.order_by(models.Product.name).limit(limit).all()
+    desc = (sort_dir or "asc").lower() == "desc"
+    key = (sort_by or "name").lower()
+    col_map = {
+        "name": models.Product.name,
+        "code": models.Product.product_code,
+        "qty": func.coalesce(stock_sub.c.qty, 0),
+        "scheme": func.coalesce(stock_sub.c.scheme, ""),
+        "ptr": models.Product.ptr_rate,
+        "mrp": models.Product.mrp,
+    }
+    col = col_map.get(key, models.Product.name)
+    order = col.desc() if desc else col.asc()
+    rows_db = q.order_by(order, models.Product.name.asc()).limit(limit).all()
     rows = []
     for p, qty, batch_count, scheme in rows_db:
         total = int(qty or 0)
@@ -1407,6 +1439,8 @@ def get_rep_outstanding_parties(
     user: models.User,
     search: Optional[str] = None,
     limit: int = 25,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ):
     if user.role != "rep" or not user.account_id:
         raise AppError("Sales rep login required")
@@ -1416,7 +1450,13 @@ def get_rep_outstanding_parties(
     if not distributor:
         raise AppError("Distributor account not found")
     return get_outstanding_parties(
-        db, distributor, search=search, positive_only=True, limit=limit
+        db,
+        distributor,
+        search=search,
+        positive_only=True,
+        limit=limit,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
 
@@ -2285,6 +2325,8 @@ def get_outstanding_parties(
     search: Optional[str] = None,
     positive_only: bool = True,
     limit: int = 25,
+    sort_by: str = "name",
+    sort_dir: str = "asc",
 ) -> schemas.OutstandingPartyListResponse:
     """One row per party: code, name, place, bill count, outstanding sum."""
     limit = max(1, min(int(limit or 25), 100))
@@ -2327,13 +2369,10 @@ def get_outstanding_parties(
             ),
         )
         .group_by(party_key)
-        .order_by(func.coalesce(func.sum(models.OutstandingBill.balance), 0).desc())
         .all()
     )
 
-    party_count = len(grouped)
-    page = grouped[:limit]
-    place_map = _party_place_by_code(db, [r.party_id for r in page])
+    place_map = _party_place_by_code(db, [r.party_id for r in grouped])
 
     parties = [
         schemas.OutstandingPartyRow(
@@ -2347,8 +2386,22 @@ def get_outstanding_parties(
             total_paid=round(float(r.total_paid or 0), 2),
             total_balance=round(float(r.total_balance or 0), 2),
         )
-        for r in page
+        for r in grouped
     ]
+
+    key = (sort_by or "name").lower()
+    desc = (sort_dir or "asc").lower() == "desc"
+    sort_keys = {
+        "code": lambda p: ((p.party_id or "").lower(), (p.party_name or "").lower()),
+        "name": lambda p: ((p.party_name or "").lower(), (p.party_id or "").lower()),
+        "place": lambda p: ((p.place or "").lower(), (p.party_name or "").lower()),
+        "bills": lambda p: (p.bill_count, (p.party_name or "").lower()),
+        "balance": lambda p: (p.total_balance, (p.party_name or "").lower()),
+    }
+    parties.sort(key=sort_keys.get(key, sort_keys["name"]), reverse=desc)
+
+    party_count = len(parties)
+    page = parties[:limit]
 
     summary = schemas.OutstandingSummary(
         bill_count=int(totals[0] or 0),
@@ -2358,7 +2411,7 @@ def get_outstanding_parties(
         total_discount=0.0,
     )
     return schemas.OutstandingPartyListResponse(
-        summary=summary, parties=parties, party_count=party_count
+        summary=summary, parties=page, party_count=party_count
     )
 
 

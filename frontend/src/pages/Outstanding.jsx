@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../AuthContext.jsx";
 import ExcelUploadBar from "../components/ExcelUploadBar.jsx";
+import { SortTh, nextSort } from "../components/SortTh.jsx";
 import { outstanding as outstandingApi } from "../api";
 import { fmtDate, inr } from "../format";
 
@@ -12,6 +13,8 @@ export default function Outstanding() {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -25,11 +28,22 @@ export default function Outstanding() {
     account?.account_type === "distributor" ||
     account?.account_type === "sub_distributor";
 
-  const loadParties = (q = appliedSearch, rowLimit = limit) => {
+  const loadParties = (
+    q = appliedSearch,
+    rowLimit = limit,
+    by = sortBy,
+    dir = sortDir
+  ) => {
     setLoading(true);
     setError("");
     return outstandingApi
-      .parties({ search: q || undefined, positive_only: true, limit: rowLimit })
+      .parties({
+        search: q || undefined,
+        positive_only: true,
+        limit: rowLimit,
+        sort_by: by,
+        sort_dir: dir,
+      })
       .then((data) => {
         setSummary(data.summary);
         setParties(data.parties || []);
@@ -37,6 +51,13 @@ export default function Outstanding() {
       })
       .catch(() => setError("Failed to load outstanding."))
       .finally(() => setLoading(false));
+  };
+
+  const onSort = (col) => {
+    const next = nextSort(sortBy, sortDir, col);
+    setSortBy(next.sortBy);
+    setSortDir(next.sortDir);
+    loadParties(appliedSearch, limit, next.sortBy, next.sortDir);
   };
 
   const openParty = (party) => {
@@ -73,7 +94,7 @@ export default function Outstanding() {
           <p className="page-sub">
             {selected
               ? "Bill-wise outstanding for the selected party."
-              : "Party-wise outstanding. Click a party to see bills."}
+              : "Party-wise outstanding. Click a party for bills. Click headers to sort."}
           </p>
         </div>
       </div>
@@ -244,11 +265,11 @@ export default function Outstanding() {
               <table>
                 <thead>
                   <tr>
-                    <th>Code</th>
-                    <th>Party Name</th>
-                    <th>Place</th>
-                    <th style={{ textAlign: "right" }}>Bills</th>
-                    <th style={{ textAlign: "right" }}>Outstanding</th>
+                    <SortTh label="Code" col="code" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Party Name" col="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Place" col="place" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Bills" col="bills" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" />
+                    <SortTh label="Outstanding" col="balance" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" />
                   </tr>
                 </thead>
                 <tbody>

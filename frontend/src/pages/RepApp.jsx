@@ -21,6 +21,7 @@ import {
   stopPersistentRepTracking,
 } from "../persistentRepTracking";
 import { mapsUrl } from "../maps";
+import { SortTh, nextSort } from "../components/SortTh.jsx";
 
 function pickRate(batchVal, productVal) {
   const batch = Number(batchVal);
@@ -539,14 +540,26 @@ export function RepStock() {
   const [q, setQ] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const load = (search = appliedSearch, rowLimit = limit) => {
+  const load = (
+    search = appliedSearch,
+    rowLimit = limit,
+    by = sortBy,
+    dir = sortDir
+  ) => {
     setLoading(true);
     setError("");
     return repApi
-      .stock({ search: search || undefined, limit: rowLimit })
+      .stock({
+        search: search || undefined,
+        limit: rowLimit,
+        sort_by: by,
+        sort_dir: dir,
+      })
       .then((data) => setItems(data.items || []))
       .catch((e) =>
         setError(e.response?.data?.detail || "Failed to load stock")
@@ -554,15 +567,22 @@ export function RepStock() {
       .finally(() => setLoading(false));
   };
 
+  const onSort = (col) => {
+    const next = nextSort(sortBy, sortDir, col);
+    setSortBy(next.sortBy);
+    setSortDir(next.sortDir);
+    load(appliedSearch, limit, next.sortBy, next.sortDir);
+  };
+
   useEffect(() => {
-    load("", 25);
+    load("", 25, "name", "asc");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div className="rep-page">
       <h1 className="page-title">Stock</h1>
-      <p className="page-sub">Your distributor stock only (read only).</p>
+      <p className="page-sub">Your distributor stock only (read only). Tap headers to sort.</p>
       {error && <div className="error-banner">{error}</div>}
       <form
         className="toolbar"
@@ -605,11 +625,11 @@ export function RepStock() {
         <table>
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Avail</th>
-              <th>Scheme</th>
-              <th>PTR</th>
-              <th>MRP</th>
+              <SortTh label="Product" col="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="Avail" col="qty" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="Scheme" col="scheme" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="PTR" col="ptr" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <SortTh label="MRP" col="mrp" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             </tr>
           </thead>
           <tbody>
@@ -658,6 +678,8 @@ export function RepOutstanding() {
   const [q, setQ] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [limit, setLimit] = useState(25);
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -666,11 +688,21 @@ export function RepOutstanding() {
   const [billSummary, setBillSummary] = useState(null);
   const [billsLoading, setBillsLoading] = useState(false);
 
-  const loadParties = (search = appliedSearch, rowLimit = limit) => {
+  const loadParties = (
+    search = appliedSearch,
+    rowLimit = limit,
+    by = sortBy,
+    dir = sortDir
+  ) => {
     setLoading(true);
     setError("");
     return repApi
-      .outstandingParties({ search: search || undefined, limit: rowLimit })
+      .outstandingParties({
+        search: search || undefined,
+        limit: rowLimit,
+        sort_by: by,
+        sort_dir: dir,
+      })
       .then((data) => {
         setSummary(data.summary);
         setParties(data.parties || []);
@@ -680,6 +712,13 @@ export function RepOutstanding() {
         setError(e.response?.data?.detail || "Failed to load outstanding")
       )
       .finally(() => setLoading(false));
+  };
+
+  const onSort = (col) => {
+    const next = nextSort(sortBy, sortDir, col);
+    setSortBy(next.sortBy);
+    setSortDir(next.sortDir);
+    loadParties(appliedSearch, limit, next.sortBy, next.sortDir);
   };
 
   const openParty = (party) => {
@@ -715,7 +754,7 @@ export function RepOutstanding() {
       <p className="page-sub">
         {selected
           ? "Bill-wise outstanding for this party."
-          : "Party outstanding — tap a party for bill details."}
+          : "Party outstanding — tap a party for bills. Tap headers to sort."}
       </p>
       {error && <div className="error-banner">{error}</div>}
 
@@ -844,11 +883,11 @@ export function RepOutstanding() {
               <table>
                 <thead>
                   <tr>
-                    <th>Code</th>
-                    <th>Party</th>
-                    <th>Place</th>
-                    <th>Bills</th>
-                    <th>Outstanding</th>
+                    <SortTh label="Code" col="code" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Party" col="name" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Place" col="place" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Bills" col="bills" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+                    <SortTh label="Outstanding" col="balance" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
                   </tr>
                 </thead>
                 <tbody>

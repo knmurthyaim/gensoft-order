@@ -56,12 +56,20 @@ def list_outstanding_parties(
     search: Optional[str] = None,
     positive_only: bool = True,
     limit: int = Query(25, ge=1, le=100),
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
     """Party-wise outstanding summary (code, name, place, bills, balance)."""
     return crud.get_outstanding_parties(
-        db, account, search=search, positive_only=positive_only, limit=limit
+        db,
+        account,
+        search=search,
+        positive_only=positive_only,
+        limit=limit,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
 

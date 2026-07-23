@@ -192,8 +192,17 @@ tbody tr.clickable-row {
   cursor: pointer;
 }
 
-tbody tr.clickable-row:hover {
-  background: #eef5ff;
+.sortable-th {
+  color: var(--muted);
+}
+
+.sortable-th:hover {
+  color: var(--text, #0f172a);
+  background: #eef2f7;
+}
+
+.sortable-th.active {
+  color: var(--primary, #0b3a6e);
 }
 
 tbody tr:last-child td {

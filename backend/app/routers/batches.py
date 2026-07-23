@@ -15,10 +15,14 @@ def list_batches(
     product_id: Optional[int] = None,
     search: Optional[str] = None,
     limit: int = Query(25, ge=1, le=100),
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    return crud.get_batches(db, account, product_id, search, limit)
+    return crud.get_batches(
+        db, account, product_id, search, limit, sort_by=sort_by, sort_dir=sort_dir
+    )
 
 
 @router.post("", response_model=schemas.StockBatch, status_code=201)

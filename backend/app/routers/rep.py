@@ -76,12 +76,16 @@ def tag_customer_location(
 def list_stock(
     search: Optional[str] = None,
     limit: int = Query(25, ge=1, le=100),
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_rep(user)
     try:
-        rows, settings = crud.get_rep_stock(db, user, search=search, limit=limit)
+        rows, settings = crud.get_rep_stock(
+            db, user, search=search, limit=limit, sort_by=sort_by, sort_dir=sort_dir
+        )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     items = []
@@ -122,13 +126,15 @@ def list_outstanding(
 def list_outstanding_parties(
     search: Optional[str] = None,
     limit: int = Query(25, ge=1, le=100),
+    sort_by: str = Query("name"),
+    sort_dir: str = Query("asc"),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_rep(user)
     try:
         return crud.get_rep_outstanding_parties(
-            db, user, search=search, limit=limit
+            db, user, search=search, limit=limit, sort_by=sort_by, sort_dir=sort_dir
         )
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
