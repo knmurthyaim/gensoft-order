@@ -199,6 +199,7 @@ export default function Parties() {
       </p>
 
       <div className="panel">
+        <div className="table-scroll">
         <table>
           <thead>
             <tr>
@@ -290,6 +291,7 @@ export default function Parties() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {showModal && (
