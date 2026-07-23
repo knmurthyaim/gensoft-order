@@ -3,12 +3,47 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../AuthContext.jsx";
 import ChangePasswordModal from "./ChangePasswordModal.jsx";
 
+function useCompactNav() {
+  const [compact, setCompact] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      if (window.Capacitor?.isNativePlatform?.()) return true;
+    } catch {
+      /* ignore */
+    }
+    return window.matchMedia("(max-width: 960px)").matches;
+  });
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 960px)");
+    const sync = () => {
+      let native = false;
+      try {
+        native = !!window.Capacitor?.isNativePlatform?.();
+      } catch {
+        /* ignore */
+      }
+      setCompact(native || mq.matches || window.innerWidth <= 960);
+    };
+    sync();
+    mq.addEventListener?.("change", sync);
+    window.addEventListener("resize", sync);
+    return () => {
+      mq.removeEventListener?.("change", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, []);
+
+  return compact;
+}
+
 /** Nav groups: Orders / Stock / Parties / Rep / Utility */
 export default function TopNav() {
   const { account, user, logout } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [openMenu, setOpenMenu] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const compact = useCompactNav();
   const navRef = useRef(null);
   const location = useLocation();
 
@@ -228,56 +263,68 @@ export default function TopNav() {
     });
 
   return (
-    <header className="zennx-header">
+    <header className={"zennx-header" + (compact ? " is-compact" : "")}>
       <div className="zennx-header-inner">
         <div className="zennx-brand">
           <div className="zennx-logo">GenSoft</div>
           <div className="zennx-tagline">PHARMA &amp; FMCG</div>
         </div>
 
-        <nav className="zennx-tabs zennx-tabs-desktop" ref={navRef}>
-          {renderDesktopNav()}
-        </nav>
+        {!compact && (
+          <nav className="zennx-tabs zennx-tabs-desktop" ref={navRef}>
+            {renderDesktopNav()}
+          </nav>
+        )}
 
         <div className="zennx-header-actions">
-          <div className="account-chip">
-            <div className="account-name">{account?.name}</div>
-            <div className="account-meta">
-              {account?.gensoft_code} · {account?.account_type}
+          {!compact && (
+            <div className="account-chip">
+              <div className="account-name">{account?.name}</div>
+              <div className="account-meta">
+                {account?.gensoft_code} · {account?.account_type}
+              </div>
             </div>
-          </div>
-          <span className="zennx-avatar">{initial}</span>
-          <button
-            type="button"
-            className="logout-btn zennx-desktop-only"
-            onClick={() => setShowPassword(true)}
-            title="Change password"
-          >
-            Password
-          </button>
-          <button
-            type="button"
-            className="logout-btn zennx-desktop-only"
-            onClick={logout}
-            title="Logout"
-          >
-            Logout
-          </button>
-          <button
-            type="button"
-            className="zennx-burger"
-            aria-label={mobileOpen ? "Close menu" : "Open menu"}
-            aria-expanded={mobileOpen}
-            onClick={() => setMobileOpen((v) => !v)}
-          >
-            <span />
-            <span />
-            <span />
-          </button>
+          )}
+          <span className="zennx-avatar" title={account?.name || ""}>
+            {initial}
+          </span>
+          {!compact && (
+            <>
+              <button
+                type="button"
+                className="logout-btn"
+                onClick={() => setShowPassword(true)}
+                title="Change password"
+              >
+                Password
+              </button>
+              <button
+                type="button"
+                className="logout-btn"
+                onClick={logout}
+                title="Logout"
+              >
+                Logout
+              </button>
+            </>
+          )}
+          {compact && (
+            <button
+              type="button"
+              className="zennx-burger"
+              aria-label={mobileOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileOpen}
+              onClick={() => setMobileOpen((v) => !v)}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+          )}
         </div>
       </div>
 
-      {mobileOpen && (
+      {compact && mobileOpen && (
         <>
           <button
             type="button"
