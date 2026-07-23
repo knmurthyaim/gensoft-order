@@ -75,7 +75,7 @@ def tag_customer_location(
 @router.get("/stock")
 def list_stock(
     search: Optional[str] = None,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     sort_by: str = Query("name"),
     sort_dir: str = Query("asc"),
     user: models.User = Depends(get_current_user),
@@ -108,7 +108,7 @@ def list_stock(
 @router.get("/outstanding", response_model=schemas.OutstandingListResponse)
 def list_outstanding(
     search: Optional[str] = None,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -125,7 +125,7 @@ def list_outstanding(
 @router.get("/outstanding/parties", response_model=schemas.OutstandingPartyListResponse)
 def list_outstanding_parties(
     search: Optional[str] = None,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     sort_by: str = Query("name"),
     sort_dir: str = Query("asc"),
     user: models.User = Depends(get_current_user),

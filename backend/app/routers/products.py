@@ -55,7 +55,7 @@ PRODUCT_SAMPLE_ROW = [
 @router.get("", response_model=List[schemas.Product])
 def list_products(
     search: Optional[str] = None,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     sort_by: str = Query("name"),
     sort_dir: str = Query("asc"),
     account: models.Account = Depends(get_current_account),

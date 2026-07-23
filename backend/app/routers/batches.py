@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/batches", tags=["stock-batches"])
 def list_batches(
     product_id: Optional[int] = None,
     search: Optional[str] = None,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     sort_by: str = Query("name"),
     sort_dir: str = Query("asc"),
     account: models.Account = Depends(get_current_account),

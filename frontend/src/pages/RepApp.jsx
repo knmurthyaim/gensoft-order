@@ -22,6 +22,7 @@ import {
 } from "../persistentRepTracking";
 import { mapsUrl } from "../maps";
 import { SortTh, nextSort } from "../components/SortTh.jsx";
+import { RowLimitSelect } from "../rowLimits.jsx";
 
 function pickRate(batchVal, productVal) {
   const batch = Number(batchVal);
@@ -602,20 +603,14 @@ export function RepStock() {
         <button className="btn secondary" type="submit" disabled={loading}>
           Search
         </button>
-        <select
-          className="rows-select"
-          aria-label="Rows to show"
+        <RowLimitSelect
           value={limit}
-          onChange={(e) => {
-            const next = Number(e.target.value);
+          onChange={(next) => {
             setLimit(next);
             load(appliedSearch, next);
           }}
-        >
-          {[25, 50, 100].map((n) => (
-            <option key={n} value={n}>{n} rows</option>
-          ))}
-        </select>
+          disabled={loading}
+        />
       </form>
       <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
         {loading ? "Loading…" : `Showing ${items.length} stock items.`}
@@ -856,22 +851,14 @@ export function RepOutstanding() {
             <button className="btn secondary" type="submit" disabled={loading}>
               Search
             </button>
-            <select
-              className="rows-select"
-              aria-label="Rows to show"
+            <RowLimitSelect
               value={limit}
-              onChange={(e) => {
-                const next = Number(e.target.value);
+              onChange={(next) => {
                 setLimit(next);
                 loadParties(appliedSearch, next);
               }}
-            >
-              {[25, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n} rows
-                </option>
-              ))}
-            </select>
+              disabled={loading}
+            />
           </form>
           <p className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
             {loading

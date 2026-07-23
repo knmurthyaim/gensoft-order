@@ -43,7 +43,7 @@ OUTSTANDING_SAMPLE_ROW = [
 def list_outstanding(
     search: Optional[str] = None,
     positive_only: bool = True,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     account: models.Account = Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
@@ -55,7 +55,7 @@ def list_outstanding(
 def list_outstanding_parties(
     search: Optional[str] = None,
     positive_only: bool = True,
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(25, ge=0, le=100000),
     sort_by: str = Query("name"),
     sort_dir: str = Query("asc"),
     account: models.Account = Depends(get_current_account),

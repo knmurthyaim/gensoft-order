@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../AuthContext.jsx";
 import ExcelUploadBar from "../components/ExcelUploadBar.jsx";
 import { SortTh, nextSort } from "../components/SortTh.jsx";
+import { RowLimitSelect } from "../rowLimits.jsx";
 import { outstanding as outstandingApi } from "../api";
 import { fmtDate, inr } from "../format";
 
@@ -237,22 +238,14 @@ export default function Outstanding() {
             <button className="btn secondary" type="submit" disabled={loading}>
               Search
             </button>
-            <select
-              className="rows-select"
-              aria-label="Rows to show"
+            <RowLimitSelect
               value={limit}
-              onChange={(e) => {
-                const next = Number(e.target.value);
+              onChange={(next) => {
                 setLimit(next);
                 loadParties(appliedSearch, next);
               }}
-            >
-              {[25, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n} rows
-                </option>
-              ))}
-            </select>
+              disabled={loading}
+            />
           </form>
           <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
             {loading

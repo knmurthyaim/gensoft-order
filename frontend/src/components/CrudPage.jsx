@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal.jsx";
 import { SortTh, nextSort } from "./SortTh.jsx";
+import { RowLimitSelect } from "../rowLimits.jsx";
 
 function emptyFromFields(fields) {
   const obj = {};
@@ -164,20 +165,14 @@ export default function CrudPage({
             Search
           </button>
           {serverLimited && (
-            <select
-              className="rows-select"
-              aria-label="Rows to show"
+            <RowLimitSelect
               value={limit}
-              onChange={(e) => {
-                const next = Number(e.target.value);
+              onChange={(next) => {
                 setLimit(next);
                 load(appliedSearch, next);
               }}
-            >
-              {[25, 50, 100].map((n) => (
-                <option key={n} value={n}>{n} rows</option>
-              ))}
-            </select>
+              disabled={loading}
+            />
           )}
         </form>
       )}

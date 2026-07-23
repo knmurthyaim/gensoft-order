@@ -14,6 +14,32 @@ class AppError(Exception):
     pass
 
 
+# Max rows when client asks for ALL (limit=0). Hard ceiling for safety.
+LIST_LIMIT_ALL_CAP = 100_000
+
+
+def normalize_list_limit(limit, default: int = 25) -> Optional[int]:
+    """Return SQL LIMIT, or None for ALL (no limit / full list).
+
+    Frontend sends 0 for ALL. Positive values are capped at LIST_LIMIT_ALL_CAP.
+    """
+    try:
+        n = int(limit) if limit is not None else default
+    except (TypeError, ValueError):
+        n = default
+    if n <= 0:
+        return None
+    return max(1, min(n, LIST_LIMIT_ALL_CAP))
+
+
+def apply_query_limit(query, limit):
+    """Apply normalize_list_limit to a SQLAlchemy query."""
+    lim = normalize_list_limit(limit)
+    if lim is None:
+        return query
+    return query.limit(lim)
+
+
 # ---------- Accounts / Registration ----------
 def _gen_code(db: Session) -> str:
     while True:
@@ -858,7 +884,6 @@ def get_products(
 ):
     from sqlalchemy import func, select
 
-    limit = max(1, min(int(limit or 25), 100))
     q = db.query(models.Product).filter(
         models.Product.owner_account_id == account.id
     )
@@ -894,15 +919,16 @@ def get_products(
             .scalar_subquery()
         )
         order = stock_sum.desc() if desc else stock_sum.asc()
-        rows = q.order_by(order, models.Product.name.asc()).limit(limit).all()
+        q = q.order_by(order, models.Product.name.asc())
     else:
         col = col_map.get(key, models.Product.name)
         order = col.desc() if desc else col.asc()
         if key != "name":
-            rows = q.order_by(order, models.Product.name.asc()).limit(limit).all()
+            q = q.order_by(order, models.Product.name.asc())
         else:
-            rows = q.order_by(order).limit(limit).all()
+            q = q.order_by(order)
 
+    rows = apply_query_limit(q, limit).all()
     return [_attach_stock(p) for p in rows]
 
 
@@ -972,7 +998,6 @@ def get_batches(
 ):
     from sqlalchemy.orm import joinedload
 
-    limit = max(1, min(int(limit or 25), 100))
     q = (
         db.query(models.StockBatch)
         .options(joinedload(models.StockBatch.product))
@@ -1006,8 +1031,10 @@ def get_batches(
     order = col.desc() if desc else col.asc()
     # Stable secondary: product name then batch
     if key != "name":
-        return q.order_by(order, models.Product.name.asc()).limit(limit).all()
-    return q.order_by(order, models.StockBatch.batch_no.asc()).limit(limit).all()
+        q = q.order_by(order, models.Product.name.asc())
+    else:
+        q = q.order_by(order, models.StockBatch.batch_no.asc())
+    return apply_query_limit(q, limit).all()
 
 
 def get_batch(db: Session, account: models.Account, batch_id: int):
@@ -1409,9 +1436,7 @@ def get_rep_stock(
     settings = get_distributor_settings(distributor)
     hide_hold = bool(distributor.hide_hold_products_from_salesrep)
     term = (search or "").strip()
-    # Without search, keep the default list small so first open stays fast
-    default_cap = 80 if not term else 200
-    limit = max(1, min(int(limit or default_cap), default_cap))
+    lim = normalize_list_limit(limit, default=25)
 
     stock_sub = (
         db.query(
@@ -1460,7 +1485,10 @@ def get_rep_stock(
     }
     col = col_map.get(key, models.Product.name)
     order = col.desc() if desc else col.asc()
-    rows_db = q.order_by(order, models.Product.name.asc()).limit(limit).all()
+    q = q.order_by(order, models.Product.name.asc())
+    if lim is not None:
+        q = q.limit(lim)
+    rows_db = q.all()
     rows = []
     for p, qty, batch_count, scheme in rows_db:
         total = int(qty or 0)
@@ -2335,7 +2363,7 @@ def get_outstanding(
     positive_only: bool = True,
     limit: int = 25,
 ) -> tuple[schemas.OutstandingSummary, List[schemas.OutstandingBillRow]]:
-    limit = max(1, min(int(limit or 25), 100))
+    lim = normalize_list_limit(limit)
     q = _outstanding_base_query(db, account, search=search, positive_only=positive_only)
     if q is None:
         empty = schemas.OutstandingSummary(
@@ -2354,14 +2382,13 @@ def get_outstanding(
         func.coalesce(func.sum(models.OutstandingBill.balance), 0),
     ).one()
 
-    bills = (
-        q.order_by(
-            models.OutstandingBill.party_name,
-            models.OutstandingBill.invoice_date.desc(),
-        )
-        .limit(limit)
-        .all()
+    bills_q = q.order_by(
+        models.OutstandingBill.party_name,
+        models.OutstandingBill.invoice_date.desc(),
     )
+    if lim is not None:
+        bills_q = bills_q.limit(lim)
+    bills = bills_q.all()
 
     place_map = _party_place_by_code(db, [b.party_id for b in bills])
 
@@ -2402,7 +2429,7 @@ def get_outstanding_parties(
     sort_dir: str = "asc",
 ) -> schemas.OutstandingPartyListResponse:
     """One row per party: code, name, place, bill count, outstanding sum."""
-    limit = max(1, min(int(limit or 25), 100))
+    lim = normalize_list_limit(limit)
     q = _outstanding_base_query(db, account, search=search, positive_only=positive_only)
     empty = schemas.OutstandingSummary(
         bill_count=0,
@@ -2474,7 +2501,7 @@ def get_outstanding_parties(
     parties.sort(key=sort_keys.get(key, sort_keys["name"]), reverse=desc)
 
     party_count = len(parties)
-    page = parties[:limit]
+    page = parties if lim is None else parties[:lim]
 
     summary = schemas.OutstandingSummary(
         bill_count=int(totals[0] or 0),

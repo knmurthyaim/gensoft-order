@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "../components/Modal.jsx";
 import { SortTh, nextSort } from "../components/SortTh.jsx";
+import { RowLimitSelect } from "../rowLimits.jsx";
 import { batches, products as prodApi } from "../api";
 import {
   fmtExpiry,
@@ -181,20 +182,14 @@ export default function Stock() {
         <button className="btn secondary" type="submit" disabled={loading}>
           Search
         </button>
-        <select
-          className="rows-select"
-          aria-label="Rows to show"
+        <RowLimitSelect
           value={limit}
-          onChange={(e) => {
-            const next = Number(e.target.value);
+          onChange={(next) => {
             setLimit(next);
             load(appliedSearch, next);
           }}
-        >
-          {[25, 50, 100].map((n) => (
-            <option key={n} value={n}>{n} rows</option>
-          ))}
-        </select>
+          disabled={loading}
+        />
       </form>
       <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
         {loading ? "Loading…" : `Showing ${rows.length} rows. Search to find other stock.`}
