@@ -2244,6 +2244,15 @@ textarea {
   box-shadow: inset 0 -3px 0 #1a73e8;
 }
 
+.rep-main {
+  flex: 1;
+  padding: 16px;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
 /* Distributor native app — more tabs, scroll sideways like a chip bar */
 .dist-app .rep-tabs a {
   flex: 0 0 auto;
