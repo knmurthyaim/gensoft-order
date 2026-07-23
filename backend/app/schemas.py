@@ -108,12 +108,12 @@ class Me(BaseModel):
 # ---------- Sales Rep ----------
 class SalesRepBase(BaseModel):
     name: str
-    phone: str = ""
+    phone: str
     email: str = ""
 
 
 class SalesRepCreate(SalesRepBase):
-    username: Optional[str] = None
+    username: Optional[str] = None  # ignored — login id is phone
     password: Optional[str] = None
 
 
@@ -121,7 +121,7 @@ class SalesRepUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
-    username: Optional[str] = None
+    username: Optional[str] = None  # ignored — login id is phone
     password: Optional[str] = None
 
 

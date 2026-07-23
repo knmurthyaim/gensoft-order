@@ -6,7 +6,7 @@ const DEMO = [
   { u: "balaji", label: "Balaji Agencies (Distributor)" },
   { u: "dattha", label: "Sri Dattha Pharmacy (Retailer)" },
   { u: "vasavi", label: "Vasavi Medical (Retailer)" },
-  { u: "naresh", label: "M Naresh (Sales Rep app)" },
+  { u: "9000011111", label: "M Naresh (Sales Rep — phone login)" },
 ];
 
 function isNativeApp() {
@@ -54,12 +54,14 @@ export default function Login() {
 
         <form onSubmit={submitLogin}>
           <div className="field">
-            <label>Username</label>
+            <label>Username / Phone</label>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
               autoFocus
+              autoComplete="username"
+              placeholder="Phone number for sales reps"
             />
           </div>
           <div className="field">
@@ -77,6 +79,9 @@ export default function Login() {
 
           <div className="demo-box">
             <div className="muted">Demo accounts (password: demo1234)</div>
+            <div className="muted" style={{ marginBottom: 8 }}>
+              Sales reps sign in with their phone number (or unique name).
+            </div>
             <div className="demo-chips">
               {DEMO.map((d) => (
                 <button

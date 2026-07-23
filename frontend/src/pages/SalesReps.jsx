@@ -5,35 +5,39 @@ export default function SalesReps() {
   return (
     <CrudPage
       title="Sales Reps"
-      subtitle="Create field executives with an App username + password. They log in on phone/web, see only assigned customers, and place orders to you (Orders Received → Sales Rep Order)."
+      subtitle="Phone number is the app login ID and must be unique for every sales rep. Set a password so they can sign in on phone/web."
       addLabel="+ Add Sales Rep"
       resource={salesReps}
       columns={[
         { header: "Name", render: (r) => <strong>{r.name}</strong> },
-        { header: "Phone", render: (r) => r.phone || "—" },
+        {
+          header: "Phone (login ID)",
+          render: (r) => r.phone || "—",
+        },
         {
           header: "App login",
           render: (r) =>
             r.has_login ? (
-              <span className="badge ok">{r.username} / set</span>
+              <span className="badge ok">{r.phone || r.username} / set</span>
             ) : (
-              <span className="muted">Edit → set username & password</span>
+              <span className="muted">Edit → set password to enable login</span>
             ),
         },
       ]}
       fields={[
         { name: "name", label: "Name", required: true, full: true },
-        { name: "phone", label: "Phone" },
-        { name: "email", label: "Email" },
         {
-          name: "username",
-          label: "App username (required for login)",
+          name: "phone",
+          label: "Phone (unique — used as app login ID)",
+          required: true,
           full: true,
         },
+        { name: "email", label: "Email" },
         {
           name: "password",
-          label: "App password (required to create/reset login)",
+          label: "App password (required on create; leave blank to keep)",
           type: "password",
+          required: true,
           full: true,
         },
       ]}

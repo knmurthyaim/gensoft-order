@@ -187,6 +187,40 @@ def get_sales_rep(db: Session, account: models.Account, rep_id: int):
     return _enrich_sales_rep(db, obj) if obj else None
 
 
+def normalize_phone(phone: str | None) -> str:
+    """Digits-only phone. Strip leading 91 country code when 12 digits."""
+    digits = "".join(c for c in (phone or "") if c.isdigit())
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits
+
+
+def _phone_taken(
+    db: Session, phone_norm: str, exclude_rep_id: Optional[int] = None
+) -> bool:
+    """True if another sales rep already uses this phone (any distributor)."""
+    if not phone_norm:
+        return False
+    q = db.query(models.SalesRep).filter(models.SalesRep.phone != "")
+    if exclude_rep_id is not None:
+        q = q.filter(models.SalesRep.id != exclude_rep_id)
+    for rep in q.all():
+        if normalize_phone(rep.phone) == phone_norm:
+            return True
+    return False
+
+
+def _username_taken(
+    db: Session, username: str, exclude_user_id: Optional[int] = None
+) -> bool:
+    q = db.query(models.User).filter(models.User.username == username)
+    if exclude_user_id is not None:
+        q = q.filter(models.User.id != exclude_user_id)
+    return q.first() is not None
+
+
 def _enrich_sales_rep(db: Session, rep: models.SalesRep | None):
     if not rep:
         return None
@@ -195,7 +229,8 @@ def _enrich_sales_rep(db: Session, rep: models.SalesRep | None):
         .filter(models.User.sales_rep_id == rep.id)
         .first()
     )
-    rep.username = user.username if user else None
+    # Login id is the phone (also stored as username)
+    rep.username = (user.username if user else None) or normalize_phone(rep.phone) or None
     rep.has_login = bool(user)
     return rep
 
@@ -204,84 +239,71 @@ def _set_sales_rep_login(
     db: Session,
     account: models.Account,
     rep: models.SalesRep,
-    username: Optional[str],
     password: Optional[str],
 ):
-    username = (username or "").strip()
+    """Create/update rep app login. Username is always the unique phone number."""
+    phone_norm = normalize_phone(rep.phone)
+    if not phone_norm:
+        raise AppError("Phone number is required for sales rep app login")
+    if len(phone_norm) < 10:
+        raise AppError("Enter a valid 10-digit phone number")
+
     password = password or ""
-    if not username and not password:
-        return
-    if username and not password:
-        # updating username only requires existing user + password for new
-        existing = (
-            db.query(models.User)
-            .filter(models.User.sales_rep_id == rep.id)
-            .first()
-        )
-        if not existing:
-            raise AppError("Password is required to create app login")
-        clash = (
-            db.query(models.User)
-            .filter(models.User.username == username, models.User.id != existing.id)
-            .first()
-        )
-        if clash:
-            raise AppError(f"Username '{username}' already exists")
-        existing.username = username
-        return
-
-    if password and not username:
-        existing = (
-            db.query(models.User)
-            .filter(models.User.sales_rep_id == rep.id)
-            .first()
-        )
-        if not existing:
-            raise AppError("Username is required to create app login")
-        existing.password_hash = hash_password(password)
-        return
-
-    # both provided — create or update
-    clash = (
-        db.query(models.User)
-        .filter(models.User.username == username)
-        .first()
-    )
     existing = (
         db.query(models.User)
         .filter(models.User.sales_rep_id == rep.id)
         .first()
     )
-    if clash and (not existing or clash.id != existing.id):
-        raise AppError(f"Username '{username}' already exists")
+    login_id = phone_norm
+
+    if _username_taken(db, login_id, exclude_user_id=existing.id if existing else None):
+        raise AppError(
+            f"Phone '{login_id}' is already used as a login for another user"
+        )
+
     if existing:
-        existing.username = username
-        existing.password_hash = hash_password(password)
+        existing.username = login_id
         existing.name = rep.name
         existing.is_active = True
-    else:
-        db.add(
-            models.User(
-                username=username,
-                password_hash=hash_password(password),
-                name=rep.name,
-                role="rep",
-                account_id=account.id,
-                sales_rep_id=rep.id,
-                is_active=True,
-            )
+        if password:
+            existing.password_hash = hash_password(password)
+        return
+
+    if not password:
+        raise AppError("Password is required to create app login")
+    db.add(
+        models.User(
+            username=login_id,
+            password_hash=hash_password(password),
+            name=rep.name,
+            role="rep",
+            account_id=account.id,
+            sales_rep_id=rep.id,
+            is_active=True,
         )
+    )
 
 
 def create_sales_rep(db: Session, account: models.Account, data: schemas.SalesRepCreate):
     if account.account_type not in ("distributor", "sub_distributor", "stockist"):
         raise AppError("Only distributors can manage sales reps")
+    phone_norm = normalize_phone(data.phone)
+    if not phone_norm:
+        raise AppError("Phone number is required and must be unique for each sales rep")
+    if len(phone_norm) < 10:
+        raise AppError("Enter a valid 10-digit phone number")
+    if _phone_taken(db, phone_norm):
+        raise AppError(f"Phone '{phone_norm}' is already used by another sales rep")
+    if not (data.password or "").strip():
+        raise AppError("Password is required to create sales rep app login")
+
     payload = data.model_dump(exclude={"username", "password"})
+    payload["phone"] = phone_norm
     obj = models.SalesRep(owner_account_id=account.id, **payload)
     db.add(obj)
     db.flush()
     try:
-        _set_sales_rep_login(db, account, obj, data.username, data.password)
+        _set_sales_rep_login(db, account, obj, data.password)
     except AppError:
         db.rollback()
         raise
@@ -301,16 +323,34 @@ def update_sales_rep(db: Session, account, rep_id, data: schemas.SalesRepUpdate)
     )
     if not obj:
         return None
-    for k, v in data.model_dump(exclude_unset=True, exclude={"username", "password"}).items():
+
+    payload = data.model_dump(exclude_unset=True, exclude={"username", "password"})
+    if "phone" in payload:
+        phone_norm = normalize_phone(payload.get("phone"))
+        if not phone_norm:
+            raise AppError("Phone number is required and must be unique for each sales rep")
+        if len(phone_norm) < 10:
+            raise AppError("Enter a valid 10-digit phone number")
+        if _phone_taken(db, phone_norm, exclude_rep_id=obj.id):
+            raise AppError(f"Phone '{phone_norm}' is already used by another sales rep")
+        payload["phone"] = phone_norm
+
+    for k, v in payload.items():
         setattr(obj, k, v)
-    if data.username is not None or data.password is not None:
-        _set_sales_rep_login(
-            db,
-            account,
-            obj,
-            data.username if data.username is not None else None,
-            data.password if data.password is not None else None,
+
+    # Keep app login username in sync with phone when login exists or password set
+    try:
+        existing = (
+            db.query(models.User)
+            .filter(models.User.sales_rep_id == obj.id)
+            .first()
         )
+        if existing or data.password:
+            _set_sales_rep_login(db, account, obj, data.password)
+    except AppError:
+        db.rollback()
+        raise
+
     db.commit()
     db.refresh(obj)
     return _enrich_sales_rep(db, obj)

@@ -71,32 +71,48 @@ _seed_demo_if_empty()
 
 
 def _ensure_sales_rep_logins():
-    """Create missing app logins for existing sales reps (demo-friendly)."""
-    from app import models
+    """Sync sales-rep app usernames to unique phone; create missing demos if needed."""
+    from app import crud, models
     from app.security import hash_password
 
     db = SessionLocal()
     try:
         reps = db.query(models.SalesRep).all()
         for rep in reps:
-            exists = (
+            phone = crud.normalize_phone(rep.phone)
+            if phone and len(phone) >= 10 and rep.phone != phone:
+                if not crud._phone_taken(db, phone, exclude_rep_id=rep.id):
+                    rep.phone = phone
+
+            user = (
                 db.query(models.User)
                 .filter(models.User.sales_rep_id == rep.id)
                 .first()
             )
-            if exists:
+            if user:
+                if phone and len(phone) >= 10:
+                    clash = (
+                        db.query(models.User)
+                        .filter(
+                            models.User.username == phone,
+                            models.User.id != user.id,
+                        )
+                        .first()
+                    )
+                    if not clash and user.username != phone:
+                        user.username = phone
                 continue
-            # Prefer simple usernames for known demos
-            base = (rep.name or "rep").strip().lower().split()[0]
-            base = "".join(ch for ch in base if ch.isalnum()) or f"rep{rep.id}"
-            username = base
-            n = 1
-            while db.query(models.User).filter(models.User.username == username).first():
-                n += 1
-                username = f"{base}{n}"
+
+            # Missing login: create only when phone is valid and free
+            if not phone or len(phone) < 10:
+                continue
+            if crud._phone_taken(db, phone, exclude_rep_id=rep.id):
+                continue
+            if db.query(models.User).filter(models.User.username == phone).first():
+                continue
             db.add(
                 models.User(
-                    username=username,
+                    username=phone,
                     password_hash=hash_password("demo1234"),
                     name=rep.name,
                     role="rep",

@@ -386,10 +386,13 @@ textarea:focus {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.5);
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px 24px;
+  overflow-y: auto;
+  z-index: 10000;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal {
@@ -398,8 +401,9 @@ textarea:focus {
   padding: 24px;
   width: 100%;
   max-width: 480px;
-  max-height: 90vh;
-  overflow-y: auto;
+  margin: auto 0;
+  max-height: none;
+  overflow-y: visible;
   box-shadow: var(--shadow);
 }
 

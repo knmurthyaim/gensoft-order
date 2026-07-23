@@ -98,10 +98,10 @@ def run():
                                phone="9000033333", email="anil@example.com")
         db.add_all([naresh, suresh, anil])
         db.flush()
-        # App logins for sales reps (scoped to assigned customers + own stock)
+        # App logins for sales reps — username is the unique phone number
         db.add(
             models.User(
-                username="naresh",
+                username="9000011111",
                 password_hash=hash_password(PASSWORD),
                 name=naresh.name,
                 role="rep",
@@ -111,7 +111,7 @@ def run():
         )
         db.add(
             models.User(
-                username="suresh",
+                username="9000022222",
                 password_hash=hash_password(PASSWORD),
                 name=suresh.name,
                 role="rep",
@@ -307,7 +307,7 @@ def run():
               "| Users:", db.query(models.User).count(),
               "| Products:", db.query(models.Product).count(),
               "| Orders:", db.query(models.Order).count())
-        print("Demo logins (password = demo1234): vajra, balaji, dattha, vasavi, naresh (sales rep)")
+        print("Demo logins (password = demo1234): vajra, balaji, dattha, vasavi, 9000011111 (sales rep phone)")
     finally:
         db.close()
 

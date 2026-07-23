@@ -11,7 +11,30 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=schemas.Token)
 def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == data.username).first()
+    raw = (data.username or "").strip()
+    user = db.query(models.User).filter(models.User.username == raw).first()
+    if not user:
+        # Sales reps log in with phone number (digits / with spaces or +91)
+        phone = crud.normalize_phone(raw)
+        if phone:
+            user = (
+                db.query(models.User)
+                .filter(models.User.username == phone, models.User.role == "rep")
+                .first()
+            )
+        # Also allow login by sales-rep name when it uniquely matches
+        if not user and raw and (not phone or len(phone) < 10):
+            reps = (
+                db.query(models.SalesRep)
+                .filter(models.SalesRep.name.ilike(raw.strip()))
+                .all()
+            )
+            if len(reps) == 1:
+                user = (
+                    db.query(models.User)
+                    .filter(models.User.sales_rep_id == reps[0].id)
+                    .first()
+                )
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.is_active:
