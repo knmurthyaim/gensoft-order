@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./AuthContext.jsx";
 import TopNav from "./components/TopNav.jsx";
+import DistAppShell, { isNativeApp } from "./components/DistAppShell.jsx";
 import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
 import AdminUsers from "./pages/AdminUsers.jsx";
@@ -25,6 +26,27 @@ import {
   RepShell,
   RepStock,
 } from "./pages/RepApp.jsx";
+
+function DistRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/orders" element={<Orders />} />
+      <Route path="/my-orders" element={<MyOrders />} />
+      <Route path="/marketplace" element={<Marketplace />} />
+      <Route path="/products" element={<Products />} />
+      <Route path="/stock" element={<Stock />} />
+      <Route path="/parties" element={<Parties />} />
+      <Route path="/outstanding" element={<Outstanding />} />
+      <Route path="/sales-reps" element={<SalesReps />} />
+      <Route path="/rep-tracking" element={<RepTracking />} />
+      <Route path="/connections" element={<Connections />} />
+      <Route path="/settings" element={<Settings />} />
+      <Route path="/import" element={<DataImport />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -67,27 +89,21 @@ export default function App() {
     );
   }
 
-  // Distributor / stockist / retailer / sub-distributor — full app
+  // Distributor / stockist / retailer — native app uses same menu style as rep
+  if (isNativeApp()) {
+    return (
+      <DistAppShell>
+        <DistRoutes />
+      </DistAppShell>
+    );
+  }
+
+  // Web browser — full desktop TopNav
   return (
     <div className="zennx-app">
       <TopNav />
       <main className="zennx-main">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/orders" element={<Orders />} />
-          <Route path="/my-orders" element={<MyOrders />} />
-          <Route path="/marketplace" element={<Marketplace />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/stock" element={<Stock />} />
-          <Route path="/parties" element={<Parties />} />
-          <Route path="/outstanding" element={<Outstanding />} />
-          <Route path="/sales-reps" element={<SalesReps />} />
-          <Route path="/rep-tracking" element={<RepTracking />} />
-          <Route path="/connections" element={<Connections />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/import" element={<DataImport />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <DistRoutes />
       </main>
     </div>
   );
