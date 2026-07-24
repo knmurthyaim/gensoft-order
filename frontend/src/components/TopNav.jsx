@@ -1,35 +1,117 @@
-import { NavLink } from "react-router-dom";
-import { useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../AuthContext.jsx";
 import ChangePasswordModal from "./ChangePasswordModal.jsx";
 
-/** Web distributor/retailer top nav — flat links (same as before submenu grouping). */
+/** Web distributor/retailer top nav — grouped dropdowns (no scroll bar). */
 export default function TopNav() {
   const { account, user, logout } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
+  const [openMenu, setOpenMenu] = useState(null);
+  const navRef = useRef(null);
+  const location = useLocation();
+
   const isDistributor =
     account?.account_type === "distributor" ||
     account?.account_type === "sub_distributor" ||
     account?.account_type === "stockist";
 
-  const tabs = [
-    { to: "/", label: "Dashboard", end: true },
-    { to: "/orders", label: "Orders Received", show: isDistributor },
+  const menus = [
+    { type: "link", to: "/", label: "Dashboard", end: true },
     {
-      to: "/my-orders",
-      label: isDistributor ? "Orders Placed" : "Orders Received",
+      type: "group",
+      id: "orders",
+      label: "Orders",
+      items: [
+        { to: "/orders", label: "Orders Received", show: isDistributor },
+        {
+          to: "/my-orders",
+          label: isDistributor ? "Orders Placed" : "Orders Received",
+        },
+        { to: "/marketplace", label: "Place Order" },
+      ],
     },
-    { to: "/marketplace", label: "Place Order" },
-    { to: "/products", label: "My Products", show: isDistributor },
-    { to: "/stock", label: "Stock", show: isDistributor },
-    { to: "/parties", label: "Parties" },
-    { to: "/outstanding", label: "Outstanding" },
-    { to: "/sales-reps", label: "Sales Reps", show: isDistributor },
-    { to: "/rep-tracking", label: "Rep Location", show: isDistributor },
-    { to: "/connections", label: "Connections" },
-    { to: "/import", label: "Import", show: isDistributor },
-    { to: "/settings", label: "Settings", show: isDistributor },
-  ].filter((t) => t.show === undefined || t.show);
+    {
+      type: "group",
+      id: "stock",
+      label: "Stock",
+      show: isDistributor,
+      items: [
+        { to: "/products", label: "My Products" },
+        { to: "/stock", label: "Stock" },
+      ],
+    },
+    {
+      type: "group",
+      id: "parties",
+      label: "Parties",
+      items: [
+        { to: "/parties", label: "Parties" },
+        { to: "/connections", label: "Connections" },
+        { to: "/outstanding", label: "Outstanding" },
+      ],
+    },
+    {
+      type: "group",
+      id: "rep",
+      label: "Rep",
+      show: isDistributor,
+      items: [
+        { to: "/sales-reps", label: "Sales Rep" },
+        { to: "/rep-tracking", label: "Rep Location" },
+      ],
+    },
+    {
+      type: "group",
+      id: "utility",
+      label: "Utility",
+      show: isDistributor,
+      items: [
+        { to: "/settings", label: "Settings" },
+        { to: "/import", label: "Import" },
+      ],
+    },
+  ]
+    .filter((m) => m.show === undefined || m.show)
+    .map((m) =>
+      m.type === "group"
+        ? {
+            ...m,
+            items: m.items.filter((i) => i.show === undefined || i.show),
+          }
+        : m
+    )
+    .filter((m) => m.type !== "group" || m.items.length > 0);
+
+  useEffect(() => {
+    setOpenMenu(null);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (navRef.current && !navRef.current.contains(e.target)) {
+        setOpenMenu(null);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const pathActive = (to, end) => {
+    if (end) return location.pathname === to;
+    return (
+      location.pathname === to || location.pathname.startsWith(`${to}/`)
+    );
+  };
+
+  const groupActive = (items) => items.some((i) => pathActive(i.to));
 
   const initial = (account?.name || user?.name || "?").charAt(0).toUpperCase();
 
@@ -40,19 +122,69 @@ export default function TopNav() {
           <div className="zennx-logo">GenSoft</div>
           <div className="zennx-tagline">PHARMA &amp; FMCG</div>
         </div>
-        <nav className="zennx-tabs">
-          {tabs.map((t) => (
-            <NavLink
-              key={t.to}
-              to={t.to}
-              end={t.end}
-              className={({ isActive }) =>
-                "zennx-tab" + (isActive ? " active" : "")
-              }
-            >
-              {t.label}
-            </NavLink>
-          ))}
+        <nav className="zennx-tabs" ref={navRef}>
+          {menus.map((m) => {
+            if (m.type === "link") {
+              return (
+                <NavLink
+                  key={m.to}
+                  to={m.to}
+                  end={m.end}
+                  className={({ isActive }) =>
+                    "zennx-tab" + (isActive ? " active" : "")
+                  }
+                >
+                  {m.label}
+                </NavLink>
+              );
+            }
+
+            const active = groupActive(m.items);
+            const open = openMenu === m.id;
+
+            return (
+              <div
+                key={m.id}
+                className={
+                  "zennx-menu" +
+                  (active ? " active" : "") +
+                  (open ? " open" : "")
+                }
+              >
+                <button
+                  type="button"
+                  className="zennx-tab zennx-menu-trigger"
+                  aria-expanded={open}
+                  aria-haspopup="true"
+                  onClick={() =>
+                    setOpenMenu((cur) => (cur === m.id ? null : m.id))
+                  }
+                >
+                  {m.label}
+                  <span className="zennx-menu-caret" aria-hidden>
+                    ▾
+                  </span>
+                </button>
+                {open && (
+                  <div className="zennx-submenu" role="menu">
+                    {m.items.map((item) => (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        role="menuitem"
+                        className={({ isActive }) =>
+                          "zennx-submenu-link" + (isActive ? " active" : "")
+                        }
+                        onClick={() => setOpenMenu(null)}
+                      >
+                        {item.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
         <div className="zennx-header-actions">
           <div className="account-chip">
