@@ -754,18 +754,19 @@ export default function Marketplace() {
                       <input
                         type="number"
                         min="1"
+                        className="cart-qty-input"
                         value={l.qty}
                         onChange={(e) => setLineQty(key, e.target.value)}
-                        style={{ width: 72 }}
+                        aria-label={`Qty for ${l.entry.product.name}`}
                       />
                     </td>
-                    <td>
+                    <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
                       <button
                         type="button"
-                        className="btn secondary sm"
+                        className="btn danger sm"
                         onClick={() => removeLine(key)}
                       >
-                        Remove
+                        Delete
                       </button>
                     </td>
                   </tr>

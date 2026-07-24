@@ -307,6 +307,27 @@ export function RepOrder() {
     searchRef.current?.focus();
   };
 
+  const setLineQty = (productId, value) => {
+    const n = parseInt(value, 10);
+    setCart((c) => {
+      if (!c[productId]) return c;
+      if (!n || n < 1) {
+        const next = { ...c };
+        delete next[productId];
+        return next;
+      }
+      return { ...c, [productId]: { ...c[productId], qty: n } };
+    });
+  };
+
+  const removeLine = (productId) => {
+    setCart((c) => {
+      const next = { ...c };
+      delete next[productId];
+      return next;
+    });
+  };
+
   const place = async () => {
     if (!party || lines.length === 0) return;
     setPlacing(true);
@@ -437,26 +458,49 @@ export function RepOrder() {
                 <th>MRP</th>
                 <th>PTR</th>
                 <th>Qty</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((l) => (
-                <tr key={l.entry.product.id}>
-                  <td>{l.entry.product.name}
-                    <div className="muted">
-                      {[
-                        l.entry.product.manufacturer,
-                        l.entry.product.pack_size,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </div>
-                  </td>
-                  <td>{inr(l.aggregate.mrp)}</td>
-                  <td>{inr(l.aggregate.ptr_rate)}</td>
-                  <td>{l.qty}</td>
-                </tr>
-              ))}
+              {lines.map((l) => {
+                const id = l.entry.product.id;
+                return (
+                  <tr key={id}>
+                    <td>
+                      {l.entry.product.name}
+                      <div className="muted">
+                        {[
+                          l.entry.product.manufacturer,
+                          l.entry.product.pack_size,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </div>
+                    </td>
+                    <td>{inr(l.aggregate.mrp)}</td>
+                    <td>{inr(l.aggregate.ptr_rate)}</td>
+                    <td>
+                      <input
+                        type="number"
+                        min="1"
+                        className="cart-qty-input"
+                        value={l.qty}
+                        onChange={(e) => setLineQty(id, e.target.value)}
+                        aria-label={`Qty for ${l.entry.product.name}`}
+                      />
+                    </td>
+                    <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                      <button
+                        type="button"
+                        className="btn danger sm"
+                        onClick={() => removeLine(id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           </div>

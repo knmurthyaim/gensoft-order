@@ -1794,6 +1794,15 @@ textarea {
   text-align: center;
 }
 
+.cart-qty-input {
+  width: 72px;
+  padding: 8px 6px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-align: center;
+}
+
 .order-add-btn {
   min-width: 48px;
   height: 46px;
