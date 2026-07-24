@@ -40,17 +40,20 @@ def _login_blocked_message(user: models.User, db: Session) -> str | None:
 @router.post("/login", response_model=schemas.Token)
 def login(data: schemas.LoginRequest, db: Session = Depends(get_db)):
     raw = (data.username or "").strip()
-    user = db.query(models.User).filter(models.User.username == raw).first()
+    user = crud.find_user_by_username(db, raw)
     if not user:
         # Sales reps log in with phone number (digits / with spaces or +91)
         phone = crud.normalize_phone(raw)
         if phone:
             user = (
                 db.query(models.User)
-                .filter(models.User.username == phone, models.User.role == "rep")
+                .filter(
+                    models.User.username == phone,
+                    models.User.role == "rep",
+                )
                 .first()
             )
-        # Also allow login by sales-rep name when it uniquely matches
+        # Also allow login by sales-rep name when it uniquely matches (case-insensitive)
         if not user and raw and (not phone or len(phone) < 10):
             reps = (
                 db.query(models.SalesRep)

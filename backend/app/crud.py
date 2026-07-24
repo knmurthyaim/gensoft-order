@@ -53,6 +53,8 @@ def _gen_code(db: Session) -> str:
 
 def register_account(db: Session, data: schemas.RegisterRequest):
     """Admin-created accounts are active and approved immediately."""
+    if _username_taken(db, data.username):
+        raise AppError("Username already taken")
     account = models.Account(
         gensoft_code=_gen_code(db),
         account_type=data.account_type,
@@ -116,7 +118,7 @@ def public_signup(
     username = (data.username or "").strip()
     if not username:
         raise AppError("Username is required")
-    if db.query(models.User).filter(models.User.username == username).first():
+    if _username_taken(db, username):
         raise AppError("Username already taken")
     if not (data.name or "").strip():
         raise AppError("Business name is required")
@@ -450,10 +452,27 @@ def _phone_taken(
 def _username_taken(
     db: Session, username: str, exclude_user_id: Optional[int] = None
 ) -> bool:
-    q = db.query(models.User).filter(models.User.username == username)
+    uname = (username or "").strip()
+    if not uname:
+        return False
+    q = db.query(models.User).filter(
+        func.lower(models.User.username) == uname.lower()
+    )
     if exclude_user_id is not None:
         q = q.filter(models.User.id != exclude_user_id)
     return q.first() is not None
+
+
+def find_user_by_username(db: Session, username: str) -> Optional[models.User]:
+    """Case-insensitive username lookup."""
+    uname = (username or "").strip()
+    if not uname:
+        return None
+    return (
+        db.query(models.User)
+        .filter(func.lower(models.User.username) == uname.lower())
+        .first()
+    )
 
 
 def _enrich_sales_rep(db: Session, rep: models.SalesRep | None):
@@ -2508,6 +2527,8 @@ def _party_place_by_code(db: Session, party_codes) -> dict:
     codes = {(c or "").strip() for c in party_codes if (c or "").strip()}
     if not codes:
         return {}
+    # Case-insensitive code match (outstanding codes vs party master)
+    code_lower = {c.lower() for c in codes}
     rows = (
         db.query(
             models.Party.owner_account_id,
@@ -2515,13 +2536,24 @@ def _party_place_by_code(db: Session, party_codes) -> dict:
             models.Party.area,
             models.Party.city,
         )
-        .filter(models.Party.code.in_(codes))
+        .filter(func.lower(models.Party.code).in_(code_lower))
         .all()
     )
-    return {
-        (owner_id, (code or "").strip()): (area or city or "")
-        for owner_id, code, area, city in rows
-    }
+    out = {}
+    for owner_id, code, area, city in rows:
+        key_code = (code or "").strip()
+        place = (area or city or "")
+        out[(owner_id, key_code)] = place
+        # Also index by lowercase so outstanding party_id case variants resolve
+        out[(owner_id, key_code.lower())] = place
+    return out
+
+
+def _outstanding_place(place_map: dict, owner_id, party_id: str) -> str:
+    pid = (party_id or "").strip()
+    if not pid:
+        return ""
+    return place_map.get((owner_id, pid)) or place_map.get((owner_id, pid.lower())) or ""
 
 
 def _outstanding_base_query(
@@ -2555,11 +2587,27 @@ def _outstanding_base_query(
 
     if search:
         term = f"%{search.strip()}%"
+        # Match party place (area/city) case-insensitively via party master codes
+        place_codes = (
+            db.query(models.Party.code)
+            .filter(
+                or_(
+                    models.Party.area.ilike(term),
+                    models.Party.city.ilike(term),
+                    models.Party.name.ilike(term),
+                )
+            )
+        )
+        if is_supplier:
+            place_codes = place_codes.filter(
+                models.Party.owner_account_id == account.id
+            )
         q = q.filter(
             or_(
                 models.OutstandingBill.party_name.ilike(term),
                 models.OutstandingBill.party_id.ilike(term),
                 models.OutstandingBill.invoice_no.ilike(term),
+                models.OutstandingBill.party_id.in_(place_codes),
             )
         )
     return q
@@ -2606,7 +2654,7 @@ def get_outstanding(
             id=b.id,
             party_id=b.party_id or "",
             party_name=b.party_name,
-            place=place_map.get((b.owner_account_id, (b.party_id or "").strip()), ""),
+            place=_outstanding_place(place_map, b.owner_account_id, b.party_id or ""),
             invoice_no=b.invoice_no,
             invoice_date=b.invoice_date,
             amount=round(b.amount or 0.0, 2),
@@ -2687,9 +2735,7 @@ def get_outstanding_parties(
         schemas.OutstandingPartyRow(
             party_id=(r.party_id or "").strip(),
             party_name=r.party_name or "",
-            place=place_map.get(
-                (r.owner_id, (r.party_id or "").strip()), ""
-            ),
+            place=_outstanding_place(place_map, r.owner_id, r.party_id or ""),
             bill_count=int(r.bill_count or 0),
             total_amount=round(float(r.total_amount or 0), 2),
             total_paid=round(float(r.total_paid or 0), 2),
@@ -2751,14 +2797,16 @@ def get_outstanding_party_bills(
         return empty, []
 
     if pid:
-        q = q.filter(models.OutstandingBill.party_id == pid)
+        q = q.filter(
+            func.lower(models.OutstandingBill.party_id) == pid.lower()
+        )
     else:
         q = q.filter(
             or_(
                 models.OutstandingBill.party_id == "",
                 models.OutstandingBill.party_id.is_(None),
             ),
-            models.OutstandingBill.party_name == pname,
+            func.lower(models.OutstandingBill.party_name) == pname.lower(),
         )
 
     totals = q.with_entities(
@@ -2784,7 +2832,7 @@ def get_outstanding_party_bills(
             id=b.id,
             party_id=b.party_id or "",
             party_name=b.party_name,
-            place=place_map.get((b.owner_account_id, (b.party_id or "").strip()), ""),
+            place=_outstanding_place(place_map, b.owner_account_id, b.party_id or ""),
             invoice_no=b.invoice_no,
             invoice_date=b.invoice_date,
             amount=round(b.amount or 0.0, 2),
@@ -3898,15 +3946,10 @@ def admin_update_user(db: Session, user_id: int, data: schemas.AdminUserUpdate):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user or user.role == "platform_admin":
         return None
-    if data.username and data.username != user.username:
-        exists = (
-            db.query(models.User)
-            .filter(models.User.username == data.username, models.User.id != user_id)
-            .first()
-        )
-        if exists:
+    if data.username and data.username.strip().lower() != (user.username or "").lower():
+        if _username_taken(db, data.username, exclude_user_id=user_id):
             raise AppError("Username already taken")
-        user.username = data.username
+        user.username = data.username.strip()
     if data.password:
         user.password_hash = hash_password(data.password)
     if data.name is not None:
@@ -4322,11 +4365,7 @@ def bulk_upload_accounts(db: Session, rows: List[dict]) -> schemas.BulkUploadRes
             name = str(row.get("name", "")).strip()
             if not username or not password or not name:
                 raise AppError("name, username and password are required")
-            if (
-                db.query(models.User)
-                .filter(models.User.username == username)
-                .first()
-            ):
+            if _username_taken(db, username):
                 raise AppError(f"Username '{username}' already exists")
             data = schemas.RegisterRequest(
                 account_type=str(row.get("account_type", "retailer")).strip()

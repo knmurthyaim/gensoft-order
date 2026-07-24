@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
@@ -130,7 +131,9 @@ def create_account(
     db: Session = Depends(get_db),
     _admin=Depends(require_platform_admin),
 ):
-    if db.query(models.User).filter(models.User.username == data.username).first():
+    if db.query(models.User).filter(
+        func.lower(models.User.username) == (data.username or "").strip().lower()
+    ).first():
         raise HTTPException(status_code=400, detail="Username already taken")
     account, user = crud.register_account(db, data)
     return crud.admin_get_account(db, account.id)
