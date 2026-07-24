@@ -542,12 +542,33 @@ class AdminDataSummary(BaseModel):
     customer_count: int = 0
     outstanding_count: int = 0
     outstanding_balance_total: float = 0.0
+    orders_received_count: int = 0
+    orders_placed_count: int = 0
+    orders_count: int = 0
     products_last_synced: Optional[datetime] = None
     parties_last_synced: Optional[datetime] = None
     outstanding_last_synced: Optional[datetime] = None
+    orders_last_synced: Optional[datetime] = None
     products_size_mb: float = 0.0
     parties_size_mb: float = 0.0
     outstanding_size_mb: float = 0.0
+    orders_size_mb: float = 0.0
+
+
+class AdminOrderRow(BaseModel):
+    id: int
+    order_no: str
+    status: str
+    source: str = "web"
+    total_amount: float = 0.0
+    item_count: int = 0
+    direction: str = ""  # received | placed
+    counterparty_name: str = ""
+    party_name: str = ""
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class AdminClearResult(BaseModel):

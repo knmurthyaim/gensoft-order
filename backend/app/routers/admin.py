@@ -310,6 +310,21 @@ def list_account_outstanding(
     ]
 
 
+@router.get(
+    "/accounts/{account_id}/orders",
+    response_model=List[schemas.AdminOrderRow],
+)
+def list_account_orders(
+    account_id: int,
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    if not crud.admin_get_account(db, account_id):
+        raise HTTPException(status_code=404, detail="Account not found")
+    return crud.admin_list_orders(db, account_id, search=search)
+
+
 @router.delete(
     "/accounts/{account_id}/products",
     response_model=schemas.AdminClearResult,
@@ -351,5 +366,20 @@ def clear_account_outstanding(
 ):
     try:
         return crud.admin_clear_outstanding(db, account_id)
+    except crud.AppError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete(
+    "/accounts/{account_id}/orders",
+    response_model=schemas.AdminClearResult,
+)
+def clear_account_orders(
+    account_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_platform_admin),
+):
+    try:
+        return crud.admin_clear_orders(db, account_id)
     except crud.AppError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

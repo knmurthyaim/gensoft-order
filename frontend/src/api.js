@@ -202,12 +202,20 @@ export const admin = {
         params: search ? { search } : {},
       })
       .then((r) => r.data),
+  listOrders: (id, search) =>
+    api
+      .get(`/admin/accounts/${id}/orders`, {
+        params: search ? { search } : {},
+      })
+      .then((r) => r.data),
   clearProducts: (id) =>
     api.delete(`/admin/accounts/${id}/products`).then((r) => r.data),
   clearParties: (id) =>
     api.delete(`/admin/accounts/${id}/parties`).then((r) => r.data),
   clearOutstanding: (id) =>
     api.delete(`/admin/accounts/${id}/outstanding`).then((r) => r.data),
+  clearOrders: (id) =>
+    api.delete(`/admin/accounts/${id}/orders`).then((r) => r.data),
   downloadTemplate: () =>
     api
       .get("/admin/accounts/upload/template", { responseType: "blob" })

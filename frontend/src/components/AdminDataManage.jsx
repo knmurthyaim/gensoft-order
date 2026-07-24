@@ -4,11 +4,11 @@ import { fmtDateTime, inr } from "../format";
 import Modal from "./Modal.jsx";
 
 /**
- * Super Admin — view / clear products, parties, outstanding for one account.
+ * Super Admin — view / clear products, parties, outstanding, orders for one account.
  */
 export default function AdminDataManage({ row, onClose, onNotice, onError }) {
   const accountId = row.account.id;
-  const [tab, setTab] = useState("products"); // products | parties | outstanding
+  const [tab, setTab] = useState("products"); // products | parties | outstanding | orders
   const [summary, setSummary] = useState(null);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
@@ -30,7 +30,9 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
         ? adminApi.listProducts(accountId, term)
         : t === "parties"
           ? adminApi.listParties(accountId, term)
-          : adminApi.listOutstanding(accountId, term);
+          : t === "orders"
+            ? adminApi.listOrders(accountId, term)
+            : adminApi.listOutstanding(accountId, term);
     req
       .then(setRows)
       .catch(() => onError?.("Could not load data."))
@@ -66,6 +68,7 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
       products: "ALL products and stock batches",
       parties: "ALL parties / customers",
       outstanding: "ALL outstanding bills",
+      orders: "ALL orders received and placed",
     };
     const ok = window.confirm(
       `Delete ${labels[kind]} for "${row.account.name}" (${row.account.gensoft_code})?\n\nThis cannot be undone.`
@@ -78,7 +81,9 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
           ? await adminApi.clearProducts(accountId)
           : kind === "parties"
             ? await adminApi.clearParties(accountId)
-            : await adminApi.clearOutstanding(accountId);
+            : kind === "orders"
+              ? await adminApi.clearOrders(accountId)
+              : await adminApi.clearOutstanding(accountId);
       onNotice?.(result.message || "Cleared.");
       await loadSummary();
       loadRows(tab, search);
@@ -131,6 +136,15 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
             sizeMb={summary.outstanding_size_mb}
             onClick={() => switchTab("outstanding")}
           />
+          <DataCard
+            label="Orders"
+            active={tab === "orders"}
+            count={summary.orders_count}
+            sub={`${summary.orders_received_count || 0} received · ${summary.orders_placed_count || 0} placed`}
+            synced={summary.orders_last_synced}
+            sizeMb={summary.orders_size_mb}
+            onClick={() => switchTab("orders")}
+          />
         </div>
       )}
 
@@ -147,6 +161,8 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
       >
         Customers are linked to outstanding bills. Delete outstanding first —
         then customers. You cannot delete a customer while outstanding remains.
+        Delete all orders removes both received and placed orders for this
+        account.
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
@@ -162,7 +178,7 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
         <button
           type="button"
           className="btn secondary sm"
-          disabled={!!busy || (summary?.outstanding_count > 0)}
+          disabled={!!busy || summary?.outstanding_count > 0}
           title={
             summary?.outstanding_count > 0
               ? "Delete outstanding first"
@@ -188,6 +204,17 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
         >
           {busy === "outstanding" ? "Deleting…" : "Delete all outstanding"}
         </button>
+        <button
+          type="button"
+          className="btn secondary sm"
+          disabled={!!busy}
+          style={{ color: "#b91c1c" }}
+          onClick={() => clearAll("orders")}
+        >
+          {busy === "orders"
+            ? "Deleting…"
+            : "Delete all orders (received & placed)"}
+        </button>
       </div>
 
       <div className="zennx-tabs" style={{ marginBottom: 10 }}>
@@ -195,13 +222,18 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
           ["products", "Products / Stock"],
           ["parties", "Customers / Parties"],
           ["outstanding", "Outstanding"],
+          ["orders", "Orders"],
         ].map(([key, label]) => (
           <button
             key={key}
             type="button"
             className={"zennx-tab" + (tab === key ? " active" : "")}
             onClick={() => switchTab(key)}
-            style={{ border: "none", background: "transparent", cursor: "pointer" }}
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+            }}
           >
             {label}
           </button>
@@ -215,14 +247,19 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
               ? "Search product code / name…"
               : tab === "parties"
                 ? "Search party code / name…"
-                : "Search invoice / party…"
+                : tab === "orders"
+                  ? "Search order no / status…"
+                  : "Search invoice / party…"
           }
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
       </div>
 
-      <div className="panel" style={{ maxHeight: 360, overflow: "auto", padding: 0 }}>
+      <div
+        className="panel"
+        style={{ maxHeight: 360, overflow: "auto", padding: 0 }}
+      >
         {loading ? (
           <div className="empty" style={{ padding: 20 }}>
             Loading…
@@ -292,6 +329,48 @@ export default function AdminDataManage({ row, onClose, onNotice, onError }) {
                 <tr>
                   <td colSpan={6} className="empty">
                     No parties.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        ) : tab === "orders" ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Direction</th>
+                <th>Party / Counterparty</th>
+                <th>Status</th>
+                <th>Items</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((o) => (
+                <tr key={o.id}>
+                  <td>
+                    <strong>{o.order_no}</strong>
+                    <div className="muted">{fmtDateTime(o.created_at)}</div>
+                  </td>
+                  <td>{o.direction}</td>
+                  <td>
+                    {o.party_name || o.counterparty_name || "—"}
+                    {o.party_name &&
+                    o.counterparty_name &&
+                    o.party_name !== o.counterparty_name ? (
+                      <div className="muted">{o.counterparty_name}</div>
+                    ) : null}
+                  </td>
+                  <td>{o.status}</td>
+                  <td>{o.item_count}</td>
+                  <td>{inr(o.total_amount)}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="empty">
+                    No orders.
                   </td>
                 </tr>
               )}
@@ -367,15 +446,13 @@ function DataCard({ label, active, count, sub, synced, sizeMb, onClick }) {
       </div>
       <div style={{ fontSize: 20, fontWeight: 700 }}>{count}</div>
       {sub && (
-        <div className="muted" style={{ fontSize: 12 }}>
+        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
           {sub}
         </div>
       )}
       <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-        Synced: {synced ? fmtDateTime(synced) : "never"}
-      </div>
-      <div className="muted" style={{ fontSize: 11 }}>
-        Size: {sizeMb != null ? `${sizeMb} MB` : "—"}
+        {synced ? `Last: ${fmtDateTime(synced)}` : "No data yet"}
+        {typeof sizeMb === "number" ? ` · ~${sizeMb} MB` : ""}
       </div>
     </button>
   );

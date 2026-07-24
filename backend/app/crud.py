@@ -4014,6 +4014,30 @@ def admin_account_data_summary(
         .scalar()
         or 0.0
     )
+    orders_received_count = (
+        db.query(func.count(models.Order.id))
+        .filter(models.Order.supplier_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    orders_placed_count = (
+        db.query(func.count(models.Order.id))
+        .filter(models.Order.buyer_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    # Unique orders involving this account (received and/or placed)
+    orders_count = (
+        db.query(func.count(models.Order.id))
+        .filter(
+            or_(
+                models.Order.supplier_account_id == account_id,
+                models.Order.buyer_account_id == account_id,
+            )
+        )
+        .scalar()
+        or 0
+    )
 
     def _len(col):
         return func.coalesce(func.length(col), 0)
@@ -4046,6 +4070,16 @@ def admin_account_data_summary(
             )
         )
         .filter(models.OutstandingBill.owner_account_id == account_id)
+        .scalar()
+    )
+    orders_last = (
+        db.query(func.max(models.Order.created_at))
+        .filter(
+            or_(
+                models.Order.supplier_account_id == account_id,
+                models.Order.buyer_account_id == account_id,
+            )
+        )
         .scalar()
     )
 
@@ -4121,6 +4155,28 @@ def admin_account_data_summary(
         .scalar()
         or 0
     )
+    orders_bytes = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    _len(models.Order.order_no)
+                    + _len(models.Order.status)
+                    + _len(models.Order.notes)
+                    + _len(models.Order.remarks)
+                    + 80
+                ),
+                0,
+            )
+        )
+        .filter(
+            or_(
+                models.Order.supplier_account_id == account_id,
+                models.Order.buyer_account_id == account_id,
+            )
+        )
+        .scalar()
+        or 0
+    )
 
     def _mb(n_bytes):
         return round(float(n_bytes) / (1024 * 1024), 3)
@@ -4132,9 +4188,11 @@ def admin_account_data_summary(
         products_last_synced=products_last,
         parties_last_synced=parties_last,
         outstanding_last_synced=outstanding_last,
+        orders_last_synced=orders_last,
         products_size_mb=_mb(products_bytes + batches_bytes),
         parties_size_mb=_mb(parties_bytes),
         outstanding_size_mb=_mb(outstanding_bytes),
+        orders_size_mb=_mb(orders_bytes),
         product_count=int(product_count),
         stock_batch_count=int(stock_batch_count),
         stock_qty_total=int(stock_qty_total),
@@ -4142,6 +4200,9 @@ def admin_account_data_summary(
         customer_count=int(customer_count),
         outstanding_count=int(outstanding_count),
         outstanding_balance_total=round(float(outstanding_balance_total), 2),
+        orders_received_count=int(orders_received_count),
+        orders_placed_count=int(orders_placed_count),
+        orders_count=int(orders_count),
     )
 
 
@@ -4322,6 +4383,121 @@ def admin_clear_outstanding(db: Session, account_id: int) -> schemas.AdminClearR
     return schemas.AdminClearResult(
         deleted=int(deleted),
         message=f"Deleted {deleted} outstanding bills",
+    )
+
+
+def admin_list_orders(
+    db: Session, account_id: int, search: Optional[str] = None, limit: int = 200
+) -> List[schemas.AdminOrderRow]:
+    """Orders received (as supplier) and placed (as buyer) for one account."""
+    from sqlalchemy.orm import joinedload
+
+    q = (
+        db.query(models.Order)
+        .options(
+            joinedload(models.Order.buyer),
+            joinedload(models.Order.supplier),
+            joinedload(models.Order.party),
+            joinedload(models.Order.items),
+        )
+        .filter(
+            or_(
+                models.Order.supplier_account_id == account_id,
+                models.Order.buyer_account_id == account_id,
+            )
+        )
+    )
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            or_(
+                models.Order.order_no.ilike(like),
+                models.Order.status.ilike(like),
+            )
+        )
+    orders = q.order_by(models.Order.created_at.desc()).limit(limit).all()
+    rows: List[schemas.AdminOrderRow] = []
+    for o in orders:
+        received = o.supplier_account_id == account_id
+        placed = o.buyer_account_id == account_id
+        if received and placed:
+            direction = "both"
+            counterparty = "—"
+        elif received:
+            direction = "received"
+            counterparty = (o.buyer.name if o.buyer else "") or (
+                o.party.name if o.party else ""
+            )
+        else:
+            direction = "placed"
+            counterparty = o.supplier.name if o.supplier else ""
+        rows.append(
+            schemas.AdminOrderRow(
+                id=o.id,
+                order_no=o.order_no or "",
+                status=o.status or "",
+                source=o.source or "web",
+                total_amount=round(float(o.total_amount or 0), 2),
+                item_count=len(o.items or []),
+                direction=direction,
+                counterparty_name=counterparty or "",
+                party_name=(o.party.name if o.party else "") or "",
+                created_at=o.created_at,
+            )
+        )
+    return rows
+
+
+def admin_clear_orders(db: Session, account_id: int) -> schemas.AdminClearResult:
+    """Delete all orders received and placed for an account (incl. line items)."""
+    acc = db.query(models.Account).filter(models.Account.id == account_id).first()
+    if not acc:
+        raise AppError("Account not found")
+
+    order_ids = [
+        o.id
+        for o in db.query(models.Order.id)
+        .filter(
+            or_(
+                models.Order.supplier_account_id == account_id,
+                models.Order.buyer_account_id == account_id,
+            )
+        )
+        .all()
+    ]
+    if not order_ids:
+        return schemas.AdminClearResult(
+            deleted=0, message="No orders to delete"
+        )
+
+    received_n = (
+        db.query(func.count(models.Order.id))
+        .filter(models.Order.supplier_account_id == account_id)
+        .scalar()
+        or 0
+    )
+    placed_n = (
+        db.query(func.count(models.Order.id))
+        .filter(models.Order.buyer_account_id == account_id)
+        .scalar()
+        or 0
+    )
+
+    db.query(models.OrderItem).filter(
+        models.OrderItem.order_id.in_(order_ids)
+    ).delete(synchronize_session=False)
+    deleted = (
+        db.query(models.Order)
+        .filter(models.Order.id.in_(order_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return schemas.AdminClearResult(
+        deleted=int(deleted),
+        message=(
+            f"Deleted {deleted} orders "
+            f"({int(received_n)} received, {int(placed_n)} placed)"
+        ),
     )
 
 
