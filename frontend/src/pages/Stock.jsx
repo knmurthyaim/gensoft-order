@@ -215,6 +215,15 @@ export default function Stock() {
               <tr key={b.id}>
                 <td>
                   <strong>{b.product?.name || pMap[b.product_id]?.name}</strong>
+                  <div className="muted">
+                    {[
+                      b.product?.manufacturer ||
+                        pMap[b.product_id]?.manufacturer,
+                      b.product?.pack_size || pMap[b.product_id]?.pack_size,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </div>
                 </td>
                 <td>{b.batch_no || "—"}</td>
                 <td className={nearExpiry(b.expiry_date) ? "low-stock" : ""}>

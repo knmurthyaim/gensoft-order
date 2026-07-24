@@ -21,7 +21,8 @@ export default function Products() {
             <>
               <strong>{r.name}</strong>
               <div className="muted">
-                {r.manufacturer} · {r.pack_size}
+                {[r.manufacturer, r.pack_size].filter(Boolean).join(" · ") ||
+                  "—"}
               </div>
             </>
           ),

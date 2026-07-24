@@ -383,16 +383,20 @@ export function RepOrder() {
                 <div className="suggest-title">
                   {row.entry.product.name}
                 </div>
+                <div className="suggest-sub muted">
+                  {[
+                    row.entry.product.manufacturer,
+                    row.entry.product.pack_size,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
+                </div>
                 <div className="suggest-meta-line">
-                  <span className="muted">
-                    {[
-                      row.entry.product.product_code,
-                      row.entry.product.manufacturer,
-                      row.entry.product.pack_size,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "—"}
-                  </span>
+                  {row.entry.product.product_code ? (
+                    <span className="muted">
+                      {row.entry.product.product_code}
+                    </span>
+                  ) : null}
                   <span className="suggest-col-stock">
                     {row.aggregate.available_qty == null
                       ? "—"
@@ -438,7 +442,16 @@ export function RepOrder() {
             <tbody>
               {lines.map((l) => (
                 <tr key={l.entry.product.id}>
-                  <td>{l.entry.product.name}</td>
+                  <td>{l.entry.product.name}
+                    <div className="muted">
+                      {[
+                        l.entry.product.manufacturer,
+                        l.entry.product.pack_size,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </div>
+                  </td>
                   <td>{inr(l.aggregate.mrp)}</td>
                   <td>{inr(l.aggregate.ptr_rate)}</td>
                   <td>{l.qty}</td>
@@ -632,7 +645,9 @@ export function RepStock() {
                     {row.product.product_code
                       ? `${row.product.product_code} · `
                       : ""}
-                    {row.product.manufacturer} · {row.product.pack_size}
+                    {[row.product.manufacturer, row.product.pack_size]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
                   </div>
                 </td>
                 <td>

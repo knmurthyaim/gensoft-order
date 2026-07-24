@@ -560,12 +560,18 @@ export default function Marketplace() {
                                 debouncedQ
                               )}
                             </div>
+                            <div className="suggest-sub muted">
+                              {[
+                                row.entry.product.manufacturer,
+                                row.entry.product.pack_size,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") || "—"}
+                            </div>
                             <div className="suggest-meta-line">
                               <span className="muted">
                                 {[
                                   row.entry.product.product_code,
-                                  row.entry.product.manufacturer,
-                                  row.entry.product.pack_size,
                                   orderMode === "product"
                                     ? row.supplier?.name
                                     : null,
@@ -575,7 +581,7 @@ export default function Marketplace() {
                                     : null,
                                 ]
                                   .filter(Boolean)
-                                  .join(" · ") || "—"}
+                                  .join(" · ") || null}
                               </span>
                               <span
                                 className={`suggest-col-stock stock-${tone}`}
@@ -722,8 +728,12 @@ export default function Marketplace() {
                     <td>
                       <strong>{l.entry.product.name}</strong>
                       <div className="muted">
-                        {l.entry.product.manufacturer} ·{" "}
-                        {l.entry.product.pack_size}
+                        {[
+                          l.entry.product.manufacturer,
+                          l.entry.product.pack_size,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
                       </div>
                     </td>
                     <td>{l.supplier?.name || "—"}</td>
