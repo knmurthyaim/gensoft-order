@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Modal from "../components/Modal.jsx";
 import { getDirectory, parties as partiesApi, salesReps as repApi } from "../api";
 import { useAuth } from "../AuthContext.jsx";
@@ -19,6 +20,7 @@ const empty = {
 };
 
 export default function Parties() {
+  const navigate = useNavigate();
   const { account } = useAuth();
   const canClearLocation =
     account?.account_type === "distributor" ||
@@ -256,7 +258,23 @@ export default function Parties() {
                   )}
                 </td>
                 <td className={p.outstanding_balance > 0 ? "low-stock" : ""}>
-                  {inr(p.outstanding_balance)}
+                  {p.outstanding_balance > 0 ? (
+                    <button
+                      type="button"
+                      className="link-btn outstanding-link"
+                      title="View outstanding bills"
+                      onClick={() => {
+                        const params = new URLSearchParams();
+                        if (p.code) params.set("party_id", p.code);
+                        if (p.name) params.set("party_name", p.name);
+                        navigate(`/outstanding?${params.toString()}`);
+                      }}
+                    >
+                      {inr(p.outstanding_balance)}
+                    </button>
+                  ) : (
+                    inr(p.outstanding_balance)
+                  )}
                 </td>
                 <td>
                   {p.linked_account ? (

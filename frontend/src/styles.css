@@ -386,6 +386,26 @@ textarea:focus {
   font-weight: 600;
 }
 
+button.link-btn,
+.outstanding-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.link-btn:hover,
+.outstanding-link:hover {
+  opacity: 0.85;
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

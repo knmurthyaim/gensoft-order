@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../AuthContext.jsx";
 import ExcelUploadBar from "../components/ExcelUploadBar.jsx";
 import { SortTh, nextSort } from "../components/SortTh.jsx";
@@ -8,6 +9,7 @@ import { fmtDate, inr } from "../format";
 
 export default function Outstanding() {
   const { account } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState(null);
   const [parties, setParties] = useState([]);
   const [partyCount, setPartyCount] = useState(0);
@@ -61,12 +63,18 @@ export default function Outstanding() {
     loadParties(appliedSearch, limit, next.sortBy, next.sortDir);
   };
 
-  const openParty = (party) => {
+  const openParty = (party, { fromUrl = false } = {}) => {
     setSelected(party);
     setBills([]);
     setBillSummary(null);
     setBillsLoading(true);
     setError("");
+    if (!fromUrl) {
+      const next = new URLSearchParams();
+      if (party.party_id) next.set("party_id", party.party_id);
+      if (party.party_name) next.set("party_name", party.party_name);
+      setSearchParams(next, { replace: true });
+    }
     outstandingApi
       .bills({
         party_id: party.party_id || "",
@@ -82,10 +90,36 @@ export default function Outstanding() {
       .finally(() => setBillsLoading(false));
   };
 
+  const closeParty = () => {
+    setSelected(null);
+    setBills([]);
+    setBillSummary(null);
+    setSearchParams({}, { replace: true });
+  };
+
   useEffect(() => {
     loadParties("", 25);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Open drill-down when arriving from Parties (or shared link)
+  useEffect(() => {
+    const partyId = (searchParams.get("party_id") || "").trim();
+    const partyName = (searchParams.get("party_name") || "").trim();
+    if (!partyId && !partyName) return;
+    if (
+      selected &&
+      (selected.party_id || "") === partyId &&
+      (selected.party_name || "") === partyName
+    ) {
+      return;
+    }
+    openParty(
+      { party_id: partyId, party_name: partyName },
+      { fromUrl: true }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   return (
     <div>
@@ -138,11 +172,7 @@ export default function Outstanding() {
             <button
               type="button"
               className="btn secondary"
-              onClick={() => {
-                setSelected(null);
-                setBills([]);
-                setBillSummary(null);
-              }}
+              onClick={closeParty}
             >
               ← All parties
             </button>
