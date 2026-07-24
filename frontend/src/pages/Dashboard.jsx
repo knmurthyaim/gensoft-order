@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../AuthContext.jsx";
 import { getDashboard, orders as ordersApi } from "../api";
-import { inr, orderStatusTone } from "../format";
+import { inr, orderLineTone, orderStatusTone } from "../format";
 
 export default function Dashboard() {
   const { account } = useAuth();
@@ -91,8 +91,13 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {recent.map((o) => (
-              <tr key={o.id}>
+            {recent.map((o) => {
+              const lineTone = orderLineTone(o.status);
+              return (
+              <tr
+                key={o.id}
+                className={lineTone ? `order-line-${lineTone}` : undefined}
+              >
                 <td>{o.order_no}</td>
                 <td>
                   {isDistributor
@@ -105,9 +110,10 @@ export default function Dashboard() {
                     {o.status}
                   </span>
                 </td>
-                <td>{inr(o.total_amount)}</td>
+                <td className="order-amount">{inr(o.total_amount)}</td>
               </tr>
-            ))}
+              );
+            })}
             {recent.length === 0 && (
               <tr>
                 <td colSpan={5} className="empty">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { repApi, getApiBase, tokenStore } from "../api";
 import { useAuth } from "../AuthContext.jsx";
-import { inr, fmtDate } from "../format";
+import { inr, fmtDate, orderLineTone } from "../format";
 import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
 import {
   enqueueLocation,
@@ -557,8 +557,13 @@ export function RepOrders() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((o) => (
-              <tr key={o.id}>
+            {rows.map((o) => {
+              const lineTone = orderLineTone(o.status);
+              return (
+              <tr
+                key={o.id}
+                className={lineTone ? `order-line-${lineTone}` : undefined}
+              >
                 <td>
                   <strong>{o.order_no}</strong>
                   <div className="muted">
@@ -572,9 +577,10 @@ export function RepOrders() {
                   <span className="rep-order-tag">Sent to distributor</span>
                   <div>{o.status}</div>
                 </td>
-                <td>{inr(o.total_amount)}</td>
+                <td className="order-amount">{inr(o.total_amount)}</td>
               </tr>
-            ))}
+              );
+            })}
             {!loading && rows.length === 0 && (
               <tr>
                 <td colSpan={3} className="empty">

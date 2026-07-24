@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "./Modal.jsx";
 import { orders as ordersApi } from "../api";
-import { fmtDateTime, inr, orderStatusTone } from "../format";
+import { fmtDateTime, inr, orderLineTone, orderStatusTone } from "../format";
 
 const STATUSES = [
   "received",
@@ -212,8 +212,12 @@ export default function OrdersView({ direction, title, subtitle }) {
               const customerName =
                 o.party?.name || counterparty?.name || "—";
               const isRepOrder = Boolean(o.sales_rep_id) || o.source === "app";
+              const lineTone = orderLineTone(o.status);
               return (
-                <tr key={o.id}>
+                <tr
+                  key={o.id}
+                  className={lineTone ? `order-line-${lineTone}` : undefined}
+                >
                   <td>
                     {o.order_no}
                     <div className="muted">{fmtDateTime(o.created_at)}</div>

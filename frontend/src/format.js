@@ -126,3 +126,10 @@ export function orderStatusTone(status) {
   if (PROGRESS_ORDER_STATUSES.has(status)) return "progress";
   return "progress";
 }
+
+/** Row / total amount color: rejected | done (billed/completed) | "" */
+export function orderLineTone(status) {
+  if (status === "rejected" || status === "cancelled") return "rejected";
+  if (status === "billed" || status === "completed") return "done";
+  return "";
+}

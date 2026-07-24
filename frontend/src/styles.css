@@ -894,6 +894,43 @@ details summary {
   margin-top: 4px;
 }
 
+/* Order list: total / row color by status */
+tr.order-line-rejected {
+  background: #fff5f5;
+}
+
+tr.order-line-rejected td {
+  color: #b91c1c;
+}
+
+tr.order-line-rejected .order-amount,
+tr.order-line-rejected td.order-amount {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+tr.order-line-rejected .muted {
+  color: #f87171;
+}
+
+tr.order-line-done {
+  background: #eff6ff;
+}
+
+tr.order-line-done td {
+  color: #1d4ed8;
+}
+
+tr.order-line-done .order-amount,
+tr.order-line-done td.order-amount {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+tr.order-line-done .muted {
+  color: #60a5fa;
+}
+
 .details-btn {
   background: #2c3e50;
   font-size: 12px;
