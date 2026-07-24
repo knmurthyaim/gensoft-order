@@ -2768,14 +2768,16 @@ def get_outstanding_party_bills(
         func.coalesce(func.sum(models.OutstandingBill.balance), 0),
     ).one()
 
-    bills = (
-        q.order_by(
-            models.OutstandingBill.invoice_date.desc(),
-            models.OutstandingBill.invoice_no,
-        )
-        .limit(limit)
-        .all()
-    )
+    bills = q.all()
+    # Highest age on top (oldest dues first); then invoice no for stable order
+    bills = sorted(
+        bills,
+        key=lambda b: (
+            _bill_age(b.invoice_date, b.age),
+            b.invoice_no or "",
+        ),
+        reverse=True,
+    )[:limit]
     place_map = _party_place_by_code(db, [b.party_id for b in bills])
     rows = [
         schemas.OutstandingBillRow(
