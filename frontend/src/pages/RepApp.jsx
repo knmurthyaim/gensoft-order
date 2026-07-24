@@ -1254,18 +1254,6 @@ export function RepShell({ children }) {
           <div className="zennx-logo">GenSoft</div>
           <div className="rep-header-sub">
             {salesRep?.name || user?.name} · {account?.name}
-            {locStatus === "denied" && (
-              <span className="rep-loc-badge warn"> · Location blocked</span>
-            )}
-            {locStatus === "off" && (
-              <span className="rep-loc-badge warn"> · Location off (ask distributor)</span>
-            )}
-            {(locStatus === "sharing" || locStatus === "pending") && (
-              <span className="rep-loc-badge ok"> · Location on</span>
-            )}
-            {locStatus === "error" && (
-              <span className="rep-loc-badge warn"> · Location error</span>
-            )}
           </div>
         </div>
         <div className="rep-header-actions">
