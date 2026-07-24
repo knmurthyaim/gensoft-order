@@ -527,25 +527,7 @@ export default function Marketplace() {
                     <span className="search-hint">Searching…</span>
                   )}
                   {!searching && results.length > 0 && (
-                    <ul className="order-suggest">
-                      <li
-                        className={
-                          "suggest-head" +
-                          (orderMode === "product" ? " suggest-row-product" : "")
-                        }
-                        aria-hidden="true"
-                      >
-                        <span className="suggest-col-name">Product</span>
-                        {orderMode === "product" && (
-                          <span className="suggest-col-supplier">
-                            Distributor
-                          </span>
-                        )}
-                        <span className="suggest-col-scheme">Scheme</span>
-                        <span className="suggest-col-stock">Stock</span>
-                        <span className="suggest-col-price">MRP</span>
-                        <span className="suggest-col-price">PTR</span>
-                      </li>
+                    <ul className="order-suggest order-suggest-stack">
                       {results.map((row, idx) => {
                         const avail = row.aggregate?.stock_hidden
                           ? null
@@ -559,9 +541,8 @@ export default function Marketplace() {
                           <li
                             key={`${row.supplier?.id}-${row.entry.product.id}`}
                             className={
-                              (orderMode === "product"
-                                ? "suggest-row-product "
-                                : "") + (idx === highlight ? "active" : "")
+                              "suggest-row-stack" +
+                              (idx === highlight ? " active" : "")
                             }
                             onMouseEnter={() => setHighlight(idx)}
                             onMouseDown={(e) => {
@@ -573,48 +554,52 @@ export default function Marketplace() {
                               qtyRef.current?.focus();
                             }}
                           >
-                            <div className="suggest-col-name">
-                              <strong>
-                                {highlightMatch(
-                                  row.entry.product.name,
-                                  debouncedQ
-                                )}
-                              </strong>
+                            <div className="suggest-title">
+                              {highlightMatch(
+                                row.entry.product.name,
+                                debouncedQ
+                              )}
+                            </div>
+                            <div className="suggest-meta-line">
                               <span className="muted">
-                                {row.entry.product.manufacturer}
-                                {row.entry.product.pack_size
-                                  ? ` · ${row.entry.product.pack_size}`
-                                  : ""}
+                                {[
+                                  row.entry.product.product_code,
+                                  row.entry.product.manufacturer,
+                                  row.entry.product.pack_size,
+                                  orderMode === "product"
+                                    ? row.supplier?.name
+                                    : null,
+                                  row.aggregate?.scheme &&
+                                  row.aggregate.scheme !== "—"
+                                    ? row.aggregate.scheme
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "—"}
+                              </span>
+                              <span
+                                className={`suggest-col-stock stock-${tone}`}
+                              >
+                                {avail === null || avail === undefined
+                                  ? "—"
+                                  : avail > 0
+                                    ? `Avl ${avail}`
+                                    : "0 Stock"}
+                              </span>
+                              <span className="suggest-col-price">
+                                MRP{" "}
+                                {inr(
+                                  row.aggregate?.mrp ?? row.entry.product.mrp
+                                )}
+                              </span>
+                              <span className="suggest-col-price">
+                                PTR{" "}
+                                {inr(
+                                  row.aggregate?.ptr_rate ??
+                                    row.entry.product.ptr_rate
+                                )}
                               </span>
                             </div>
-                            {orderMode === "product" && (
-                              <span className="suggest-col-supplier">
-                                {row.supplier?.name || "—"}
-                              </span>
-                            )}
-                            <span className="suggest-col-scheme">
-                              {row.aggregate?.scheme || "—"}
-                            </span>
-                            <span
-                              className={`suggest-col-stock stock-${tone}`}
-                            >
-                              {avail === null || avail === undefined
-                                ? "—"
-                                : avail > 0
-                                  ? `Avl ${avail}`
-                                  : "0 Stock"}
-                            </span>
-                            <span className="suggest-col-price">
-                              {inr(
-                                row.aggregate?.mrp ?? row.entry.product.mrp
-                              )}
-                            </span>
-                            <span className="suggest-col-price">
-                              {inr(
-                                row.aggregate?.ptr_rate ??
-                                  row.entry.product.ptr_rate
-                              )}
-                            </span>
                           </li>
                         );
                       })}

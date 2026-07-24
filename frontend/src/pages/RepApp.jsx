@@ -368,16 +368,10 @@ export function RepOrder() {
           </div>
         )}
         {results.length > 0 && !selected && (
-          <ul className="order-suggest" style={{ position: "relative" }}>
-            <li className="suggest-head suggest-row-rep">
-              <span className="suggest-col-name">Product</span>
-              <span className="suggest-col-stock">Stock</span>
-              <span className="suggest-col-price">MRP</span>
-              <span className="suggest-col-price">PTR</span>
-            </li>
+          <ul className="order-suggest order-suggest-stack" style={{ position: "relative" }}>
             {results.map((row) => (
               <li
-                className="suggest-row-rep"
+                className="suggest-row-stack"
                 key={row.entry.product.id}
                 onMouseDown={(e) => {
                   e.preventDefault();
@@ -386,29 +380,31 @@ export function RepOrder() {
                   setResults([]);
                 }}
               >
-                <div className="suggest-col-name">
-                  <strong>{row.entry.product.name}</strong>
+                <div className="suggest-title">
+                  {row.entry.product.name}
+                </div>
+                <div className="suggest-meta-line">
                   <span className="muted">
-                    {row.entry.product.product_code
-                      ? `${row.entry.product.product_code} · `
-                      : ""}
-                    {row.entry.product.manufacturer}
-                    {row.entry.product.pack_size
-                      ? ` · ${row.entry.product.pack_size}`
-                      : ""}
+                    {[
+                      row.entry.product.product_code,
+                      row.entry.product.manufacturer,
+                      row.entry.product.pack_size,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </span>
+                  <span className="suggest-col-stock">
+                    {row.aggregate.available_qty == null
+                      ? "—"
+                      : `Avl ${row.aggregate.available_qty}`}
+                  </span>
+                  <span className="suggest-col-price">
+                    MRP {inr(row.aggregate.mrp)}
+                  </span>
+                  <span className="suggest-col-price">
+                    PTR {inr(row.aggregate.ptr_rate)}
                   </span>
                 </div>
-                <span className="suggest-col-stock">
-                  {row.aggregate.available_qty == null
-                    ? "—"
-                    : `Avl ${row.aggregate.available_qty}`}
-                </span>
-                <span className="suggest-col-price">
-                  {inr(row.aggregate.mrp)}
-                </span>
-                <span className="suggest-col-price">
-                  {inr(row.aggregate.ptr_rate)}
-                </span>
               </li>
             ))}
           </ul>
