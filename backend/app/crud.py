@@ -1597,7 +1597,45 @@ def get_rep_customers(
             )
         )
     rows = q.order_by(models.Party.name).limit(limit).all()
-    return _attach_party_location_meta(db, rows)
+    rows = _attach_party_location_meta(db, rows)
+    # Prefer live outstanding bill totals (same source as Outstanding screen)
+    if rows:
+        codes = {(p.code or "").strip() for p in rows if (p.code or "").strip()}
+        ids = {p.id for p in rows}
+        bal_by_code: dict[str, float] = {}
+        bal_by_ref: dict[int, float] = {}
+        if codes or ids:
+            bill_q = db.query(
+                models.OutstandingBill.party_id,
+                models.OutstandingBill.party_ref_id,
+                func.coalesce(func.sum(models.OutstandingBill.balance), 0.0),
+            ).filter(
+                models.OutstandingBill.owner_account_id == user.account_id,
+                models.OutstandingBill.balance > 0,
+            )
+            bill_q = bill_q.group_by(
+                models.OutstandingBill.party_id,
+                models.OutstandingBill.party_ref_id,
+            )
+            for pid, pref, bal in bill_q.all():
+                code = (pid or "").strip()
+                amount = float(bal or 0)
+                if code:
+                    bal_by_code[code.lower()] = (
+                        bal_by_code.get(code.lower(), 0.0) + amount
+                    )
+                if pref:
+                    bal_by_ref[pref] = bal_by_ref.get(pref, 0.0) + amount
+        for p in rows:
+            code = (p.code or "").strip().lower()
+            from_bills = 0.0
+            if p.id in bal_by_ref:
+                from_bills = bal_by_ref[p.id]
+            elif code and code in bal_by_code:
+                from_bills = bal_by_code[code]
+            if from_bills > 0:
+                p.outstanding_balance = round(from_bills, 2)
+    return rows
 
 
 def get_rep_customer(db: Session, user: models.User, party_id: int):

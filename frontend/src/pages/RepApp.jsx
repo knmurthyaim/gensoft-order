@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { repApi, getApiBase, tokenStore } from "../api";
 import { useAuth } from "../AuthContext.jsx";
 import { inr, fmtDate, orderLineTone } from "../format";
@@ -197,6 +197,17 @@ export function RepCustomers() {
                 >
                   {taggingId === p.id ? "Tagging…" : "Tag location"}
                 </button>
+              )}
+              {(Number(p.outstanding_balance) || 0) > 0 && (
+                <Link
+                  to={`/rep/outstanding?${new URLSearchParams({
+                    ...(p.code ? { party_id: p.code } : {}),
+                    ...(p.name ? { party_name: p.name } : {}),
+                  }).toString()}`}
+                  className="rep-outstanding-link"
+                >
+                  Outstanding: {inr(p.outstanding_balance)} →
+                </Link>
               )}
               <Link to={`/rep/order/${p.id}`} className="rep-order-cta">
                 Place order →
@@ -728,6 +739,7 @@ export function RepStock() {
 }
 
 export function RepOutstanding() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState(null);
   const [parties, setParties] = useState([]);
   const [partyCount, setPartyCount] = useState(0);
@@ -777,12 +789,18 @@ export function RepOutstanding() {
     loadParties(appliedSearch, limit, next.sortBy, next.sortDir);
   };
 
-  const openParty = (party) => {
+  const openParty = (party, { fromUrl = false } = {}) => {
     setSelected(party);
     setBills([]);
     setBillSummary(null);
     setBillsLoading(true);
     setError("");
+    if (!fromUrl) {
+      const next = new URLSearchParams();
+      if (party.party_id) next.set("party_id", party.party_id);
+      if (party.party_name) next.set("party_name", party.party_name);
+      setSearchParams(next, { replace: true });
+    }
     repApi
       .outstandingBills({
         party_id: party.party_id || "",
@@ -799,10 +817,36 @@ export function RepOutstanding() {
       .finally(() => setBillsLoading(false));
   };
 
+  const closeParty = () => {
+    setSelected(null);
+    setBills([]);
+    setBillSummary(null);
+    setSearchParams({}, { replace: true });
+  };
+
   useEffect(() => {
     loadParties("", 25);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Open drill-down when arriving from Parties (or shared link)
+  useEffect(() => {
+    const partyId = (searchParams.get("party_id") || "").trim();
+    const partyName = (searchParams.get("party_name") || "").trim();
+    if (!partyId && !partyName) return;
+    if (
+      selected &&
+      (selected.party_id || "") === partyId &&
+      (selected.party_name || "") === partyName
+    ) {
+      return;
+    }
+    openParty(
+      { party_id: partyId, party_name: partyName },
+      { fromUrl: true }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   return (
     <div className="rep-page">
@@ -819,11 +863,7 @@ export function RepOutstanding() {
           <button
             type="button"
             className="btn secondary sm"
-            onClick={() => {
-              setSelected(null);
-              setBills([]);
-              setBillSummary(null);
-            }}
+            onClick={closeParty}
           >
             ← All parties
           </button>

@@ -2257,6 +2257,18 @@ textarea {
   text-decoration: none;
 }
 
+.rep-outstanding-link {
+  color: #c62828;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 6px;
+  text-decoration: none;
+}
+
+.rep-outstanding-link:hover {
+  text-decoration: underline;
+}
+
 .rep-loc-tagged {
   display: flex;
   flex-wrap: wrap;
